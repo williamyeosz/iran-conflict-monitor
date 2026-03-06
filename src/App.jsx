@@ -166,7 +166,7 @@ function NewsCard({ item, side, aiSummary, summaryLoading }) {
         <span style={{ fontSize: "9px", fontWeight: 700, letterSpacing: "0.1em", color: catColor, textTransform: "uppercase", fontFamily: "sans-serif" }}>{item.category}</span>
         <span style={{ fontSize: "10px", color: "#ccc" }}>·</span>
         <span style={{ fontSize: "10px", color: "#aaa", fontFamily: "monospace" }}>
-          {!item.hoursAgo || item.hoursAgo >= 999 ? "" :
+          {item.hoursAgo == null || item.hoursAgo >= 999 ? "" :
            item.hoursAgo < 1 ? "Just now" :
            item.hoursAgo < 24 ? `${Math.round(item.hoursAgo)}h ago` :
            item.hoursAgo < 48 ? "Yesterday" :
