@@ -1,4 +1,18 @@
-// api/summaries.js — parallel fetch + 3 parallel Claude calls (5 articles each)
+// api/summaries.js — resolve redirects lazily, then fetch + summarise
+
+// Follow redirects to get real article URL (handles Google News redirects)
+async function resolveUrl(url) {
+  if (!url || !url.includes("news.google.com")) return url;
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(4000),
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+    });
+    return res.url || url;
+  } catch { return url; }
+}
 
 async function fetchPartialText(url) {
   if (!url) return null;
@@ -9,7 +23,7 @@ async function fetchPartialText(url) {
         "Range": "bytes=0-12000",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(2000),
+      signal: AbortSignal.timeout(3000),
     });
     if (!res.ok && res.status !== 206) return null;
     const html = await res.text();
@@ -49,7 +63,7 @@ Return ONLY JSON array, no markdown: [{"i":0,"summary":"..."}]
 Articles:
 ${list}` }],
     }),
-    signal: AbortSignal.timeout(12000),
+    signal: AbortSignal.timeout(15000),
   });
 
   if (!res.ok) return batch.map((_, i) => ({ i, summary: "" }));
@@ -74,29 +88,30 @@ export default async function handler(req, res) {
   const { articles } = req.body;
   if (!articles?.length) return res.status(400).json({ error: "No articles provided" });
 
-  // Step 1: fetch all articles in parallel — max 2s wait
-  const texts = await Promise.all(articles.map(a => fetchPartialText(a.url)));
+  // Step 1: resolve any Google redirect URLs in parallel
+  const resolvedUrls = await Promise.all(articles.map(a => resolveUrl(a.url)));
 
-  // Step 2: enrich articles with fetched content (or fall back to snippet)
+  // Step 2: fetch article content from real URLs in parallel
+  const texts = await Promise.all(resolvedUrls.map(url => fetchPartialText(url)));
+
+  // Step 3: enrich with fetched content or fall back to snippet
   const enriched = articles.map((a, i) => {
     const fetched = texts[i];
     const content = (fetched && fetched.length > (a.summary?.length || 0) * 1.5)
-      ? fetched : (a.summary || "(no content)");
+      ? fetched : (a.summary || "(no content available)");
     return { ...a, content };
   });
 
-  // Step 3: split into batches of 5, run all Claude calls in parallel
+  // Step 4: split into batches of 5, run Claude calls in parallel
   const BATCH = 5;
   const batches = [];
-  for (let i = 0; i < enriched.length; i += BATCH) {
-    batches.push(enriched.slice(i, i + BATCH));
-  }
+  for (let i = 0; i < enriched.length; i += BATCH) batches.push(enriched.slice(i, i + BATCH));
 
   const batchResults = await Promise.all(
     batches.map(batch => summariseBatch(batch, anthropicKey).catch(() => []))
   );
 
-  // Step 4: flatten results, preserving original article indices
+  // Step 5: flatten results
   const summaries = [];
   batches.forEach((batch, batchIdx) => {
     const results = batchResults[batchIdx] || [];
