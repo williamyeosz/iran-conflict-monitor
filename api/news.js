@@ -115,13 +115,8 @@ function parseRSSXML(xml) {
     const link    = (block.match(/<link>(.*?)<\/link>/) || block.match(/<feedburner:origLink>(.*?)<\/feedburner:origLink>/))?.[1]?.trim() || "";
     const pubDate = block.match(/<pubDate>(.*?)<\/pubDate>/)?.[1]?.trim() || "";
     const sourceName = block.match(/<source[^>]*>(.*?)<\/source>/)?.[1]?.trim() || "";
-    const desc    = (block.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/) || block.match(/<description>(.*?)<\/description>/))?.[1]?.trim() || "";
-    // Clean HTML from description
-    // Google RSS descriptions are just the headline in an <a> tag — strip all HTML and entities
-    const summary = desc.replace(/<[^>]*>/g, "").replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&nbsp;/g," ").replace(/\s+/g," ").trim();
-    // If summary just repeats the headline, discard it
-    const cleanSummary = summary.toLowerCase().includes(title.toLowerCase().slice(0, 30)) ? "" : summary;
-    if (title && link) items.push({ title, link, pubDate, sourceName, summary });
+    // Google RSS descriptions are just the headline as an <a> tag — not useful, ignore them
+    if (title && link) items.push({ title, link, pubDate, sourceName, summary: "" });
   }
   return items;
 }
