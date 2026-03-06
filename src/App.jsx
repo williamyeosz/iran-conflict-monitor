@@ -7,7 +7,7 @@ const CAT_COLORS = {
   Political: "#6c3483", Economic: "#1e8449", Oil: "#ca6f1e",
 };
 const SIDE_CONFIG = {
-  west: { label: "Western & International", short: "Western & Intl",  color: "#1a3a6b", dot: "#2e6da4", subtitle: "BBC · Reuters · NYT · NPR · Al Jazeera · Guardian · Times of Israel" },
+  west: { label: "Western & International", short: "Western & Intl",  color: "#1a3a6b", dot: "#2e6da4", subtitle: "BBC · CNN · AP · Reuters · NYT · CBS · NPR · Al Jazeera · Guardian · Times of Israel" },
   iran: { label: "Iran & Pro-Iran Media",   short: "Iran & Pro-Iran", color: "#1a5c38", dot: "#27a05a", subtitle: "Press TV · Al Mayadeen · IRNA · Tasnim · Mehr · Tehran Times" },
   rucn: { label: "Russia & China",          short: "Russia & China",  color: "#6b1a1a", dot: "#c0392b", subtitle: "RT · Sputnik · TASS · CGTN · Xinhua · Global Times" },
 };
