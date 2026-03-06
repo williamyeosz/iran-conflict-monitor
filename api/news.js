@@ -298,21 +298,36 @@ async function fetchBraveSide(side, braveKey, force = false) {
     .filter(a => a.hoursAgo <= 72 && a.headline.length > 5);
 }
 
-// Merge RSS + Brave, deduplicate by URL and similar headlines
-function mergeAndDedupe(rssArticles, braveArticles) {
-  const seen = new Set();
-  const all = [];
+// Fuzzy headline deduplication
+const STOP_WORDS = new Set(["a","an","the","in","on","at","to","of","for","and","or","but","is","are","was","were","be","been","has","have","had","as","by","from","with","that","this","it","its","says","say","told","tell","after","over","amid","into","iran","israel","us","trump"]);
+function headlineFingerprint(h) {
+  return h.toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !STOP_WORDS.has(w))
+    .sort()
+    .join(" ");
+}
+function isSimilar(a, b) {
+  const fa = headlineFingerprint(a).split(" ");
+  const fb = new Set(headlineFingerprint(b).split(" "));
+  if (!fa.length || !fb.size) return false;
+  const overlap = fa.filter(w => fb.has(w)).length;
+  return overlap / Math.min(fa.length, fb.size) > 0.5;
+}
 
-  // RSS first (fresher)
-  for (const a of rssArticles) {
-    const key = a.url || a.headline.toLowerCase().slice(0, 60);
-    if (!seen.has(key)) { seen.add(key); all.push(a); }
+// Merge RSS + Brave, deduplicate by URL and fuzzy headline similarity
+function mergeAndDedupe(rssArticles, braveArticles) {
+  const seenUrls = new Set();
+  const all = [];
+  function tryAdd(a) {
+    if (a.url && seenUrls.has(a.url)) return;
+    if (all.some(ex => isSimilar(ex.headline, a.headline))) return;
+    if (a.url) seenUrls.add(a.url);
+    all.push(a);
   }
-  // Brave fills gaps
-  for (const a of braveArticles) {
-    const key = a.url || a.headline.toLowerCase().slice(0, 60);
-    if (!seen.has(key)) { seen.add(key); all.push(a); }
-  }
+  for (const a of rssArticles) tryAdd(a);
+  for (const a of braveArticles) tryAdd(a);
   return all;
 }
 
