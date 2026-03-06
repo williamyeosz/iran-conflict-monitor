@@ -370,7 +370,7 @@ export default function App() {
       const base = m0 ?? avg(nonNeutral) ?? 3;
       const trend = (m0 != null && m1 != null) ? (m0 - m1) * 0.5 : 0;
       setSentiment(Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2)));
-      if (data.sentimentReason) setSentimentReason(data.sentimentReason);
+      if (data.sentimentReason) setSentimentReason(data.sentimentReason.replace(/\(headline[s]?[^)]*\)/gi, "").replace(/\b(headline|article|item)?s?\s*\d+[,\s\d]*/gi, "").replace(/\s{2,}/g, " ").replace(/,\s*([.;])/g, "$1").trim());
     } catch(e) {
       if (e.isCooldown) {
         // Show cooldown message on active tab only, don't wipe existing articles
