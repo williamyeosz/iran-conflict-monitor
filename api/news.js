@@ -260,9 +260,10 @@ async function scoreMomentum(articles, anthropicKey) {
     "- Brent moves with no stated conflict cause = 3",
     "RULE: Only score 3 when there is genuinely zero directional signal.",
     "When uncertain between 2/3 choose 2. When uncertain between 3/4 choose 4.",
-    "Also return a \"reason\" field as the LAST element summarising what the MOST RECENT articles (lowest hoursAgo) reveal about momentum.",
-    "Base the reason ONLY on directional articles (score 1,2,4,5) — ignore score 3. Do NOT reference headline numbers or indices.",
-    "Format: {\"reason\": \"One sentence naming 2-3 specific events or facts driving the score, e.g. Iran lost warship + Tehran infrastructure struck vs Iran launched 19th missile wave + downed 4 US drones\"}",
+    "Also return a \"reason\" field as the LAST element explaining the RECENT MOMENTUM DIRECTION from the most recent articles.",
+    "The reason MUST match the score direction: if recent articles lean Iran (scores 1-2), lead with what Iran achieved. If US/Israel (scores 4-5), lead with their gains.",
+    "Key framing: momentum is RELATIVE. Iran can be losing the war overall but gaining momentum if recent hours show Iran doing better than before.",
+    "Write one sentence emphasising the side with momentum. Do not list both sides equally. Do NOT reference headline numbers.",
     "Return ONLY JSON array ending with reason: [{\"i\":0,\"m\":4},{\"reason\":\"...\"}]",
     "Headlines:", list,
   ].join("\n");
