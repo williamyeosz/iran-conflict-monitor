@@ -146,21 +146,36 @@ async function fetchGoogleNewsRSS() {
     return true;
   });
 
-  // Classify each item into west/iran/rucn based on domain
-  const west = [], iran = [], rucn = [], other = [];
-  for (const item of unique) {
+  // Resolve Google redirect URLs to real article URLs in parallel
+  async function resolveUrl(googleUrl) {
+    try {
+      const res = await fetch(googleUrl, {
+        method: "HEAD",
+        redirect: "follow",
+        signal: AbortSignal.timeout(3000),
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)" },
+      });
+      return res.url || googleUrl;
+    } catch { return googleUrl; }
+  }
+
+  const recent = unique.filter(item => parseRSSDate(item.pubDate) <= 72);
+  const resolvedUrls = await Promise.all(recent.map(item => resolveUrl(item.link)));
+
+  // Classify each item into west/iran/rucn based on resolved domain
+  const west = [], iran = [], rucn = [];
+  for (let i = 0; i < recent.length; i++) {
+    const item = recent[i];
     const hoursAgo = parseRSSDate(item.pubDate);
-    if (hoursAgo > 72) continue;
-    // Try to get real URL from Google redirect
-    const realUrl = item.link;
-    const westSource = getDomainSource(realUrl, WESTERN_DOMAINS) || (item.sourceName && Object.values(WESTERN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
-    const iranSource = getDomainSource(realUrl, IRAN_DOMAINS) || (item.sourceName && Object.values(IRAN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
-    const rucnSource = getDomainSource(realUrl, RUCN_DOMAINS) || (item.sourceName && Object.values(RUCN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
+    const realUrl = resolvedUrls[i];
+    const westSource = getDomainSource(realUrl, WESTERN_DOMAINS) || (Object.values(WESTERN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
+    const iranSource = getDomainSource(realUrl, IRAN_DOMAINS)   || (Object.values(IRAN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
+    const rucnSource = getDomainSource(realUrl, RUCN_DOMAINS)   || (Object.values(RUCN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
 
     const article = {
-      headline: item.title.replace(/\s*-\s*[^-]+$/, "").trim(), // strip " - Source Name" suffix
+      headline: item.title.replace(/\s*-\s*[^-]+$/, "").trim(),
       url: realUrl,
-      summary: item.summary || "",
+      summary: "",
       age: item.pubDate,
       hoursAgo,
       source: westSource || iranSource || rucnSource || item.sourceName || "Google News",
@@ -170,7 +185,7 @@ async function fetchGoogleNewsRSS() {
     if (iranSource) iran.push(article);
     else if (rucnSource) rucn.push(article);
     else if (westSource) west.push(article);
-    else west.push(article); // default to west if unknown (Google News tends to surface western sources)
+    else west.push(article);
   }
 
   return { west, iran, rucn };
