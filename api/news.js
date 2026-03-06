@@ -1,11 +1,64 @@
-// api/news.js — Brave Search for articles, Claude for categorisation only
+// api/news.js — Google News RSS (real-time) + Brave Search (coverage), Claude for momentum scoring
 
-const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 let cache = { data: null, cachedAt: 0, inFlight: null };
 let lastFetchStarted = 0;
 const FETCH_COOLDOWN_MS = 5000;
 
-const SOURCES = {
+// Google News RSS queries — near real-time, no API key needed
+const GNEWS_QUERIES = [
+  { q: "Iran Israel war",          label: "Google News" },
+  { q: "Iran strike attack",       label: "Google News" },
+  { q: "Iran missile bomb",        label: "Google News" },
+  { q: "Iran US military",         label: "Google News" },
+  { q: "Iran nuclear deal sanction",label: "Google News" },
+  { q: "Tehran Beirut conflict",   label: "Google News" },
+];
+
+// Western news sites mapped for source attribution from Google RSS
+const WESTERN_DOMAINS = {
+  "bbc.com": "BBC News", "bbc.co.uk": "BBC News",
+  "reuters.com": "Reuters",
+  "cnn.com": "CNN",
+  "apnews.com": "AP News",
+  "cbsnews.com": "CBS News",
+  "nytimes.com": "New York Times",
+  "aljazeera.com": "Al Jazeera",
+  "theguardian.com": "The Guardian",
+  "timesofisrael.com": "Times of Israel",
+  "npr.org": "NPR",
+  "washingtonpost.com": "Washington Post",
+  "wsj.com": "Wall Street Journal",
+  "axios.com": "Axios",
+  "politico.com": "Politico",
+  "nbcnews.com": "NBC News",
+  "abcnews.go.com": "ABC News",
+  "foxnews.com": "Fox News",
+  "thehill.com": "The Hill",
+  "haaretz.com": "Haaretz",
+  "jpost.com": "Jerusalem Post",
+};
+
+const IRAN_DOMAINS = {
+  "presstv.ir": "Press TV",
+  "almayadeen.net": "Al Mayadeen",
+  "irna.ir": "IRNA",
+  "tehrantimes.com": "Tehran Times",
+  "tasnimnews.com": "Tasnim News",
+  "mehrnews.com": "Mehr News",
+};
+
+const RUCN_DOMAINS = {
+  "rt.com": "RT",
+  "sputnikglobe.com": "Sputnik",
+  "tass.com": "TASS",
+  "cgtn.com": "CGTN",
+  "english.news.cn": "Xinhua",
+  "globaltimes.cn": "Global Times",
+};
+
+// Brave sources as backup / for Iran & Russian sources
+const BRAVE_SOURCES = {
   west: [
     { name: "BBC News",        query: "Iran war site:bbc.com" },
     { name: "Reuters",         query: "Iran war site:reuters.com" },
@@ -36,9 +89,100 @@ const SOURCES = {
   ],
 };
 
-// Fetch top results from Brave for a single source
+// ── Google News RSS fetch ──────────────────────────────────────────────────────
+function getDomainSource(url, domainMap) {
+  try {
+    const hostname = new URL(url).hostname.replace("www.", "");
+    for (const [domain, name] of Object.entries(domainMap)) {
+      if (hostname.includes(domain)) return name;
+    }
+  } catch {}
+  return null;
+}
+
+function parseRSSDate(dateStr) {
+  if (!dateStr) return 999;
+  try {
+    const ms = Date.now() - new Date(dateStr).getTime();
+    return Math.max(0, Math.round(ms / 3600000));
+  } catch { return 999; }
+}
+
+// Parse Google News RSS XML — extract items with title, link, pubDate, source
+function parseRSSXML(xml) {
+  const items = [];
+  const itemMatches = xml.matchAll(/<item>([\s\S]*?)<\/item>/g);
+  for (const match of itemMatches) {
+    const block = match[1];
+    const title   = (block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || block.match(/<title>(.*?)<\/title>/))?.[1]?.trim() || "";
+    const link    = (block.match(/<link>(.*?)<\/link>/) || block.match(/<feedburner:origLink>(.*?)<\/feedburner:origLink>/))?.[1]?.trim() || "";
+    const pubDate = block.match(/<pubDate>(.*?)<\/pubDate>/)?.[1]?.trim() || "";
+    const sourceName = block.match(/<source[^>]*>(.*?)<\/source>/)?.[1]?.trim() || "";
+    const desc    = (block.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/) || block.match(/<description>(.*?)<\/description>/))?.[1]?.trim() || "";
+    // Clean HTML from description
+    const summary = desc.replace(/<[^>]*>/g, "").replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').trim();
+    if (title && link) items.push({ title, link, pubDate, sourceName, summary });
+  }
+  return items;
+}
+
+async function fetchGoogleNewsRSS() {
+  const results = await Promise.all(
+    GNEWS_QUERIES.map(async ({ q }) => {
+      try {
+        const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
+        const res = await fetch(url, {
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)", "Accept": "application/rss+xml, application/xml, text/xml" },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (!res.ok) return [];
+        const xml = await res.text();
+        return parseRSSXML(xml);
+      } catch { return []; }
+    })
+  );
+
+  const allItems = results.flat();
+  // Deduplicate by URL
+  const seen = new Set();
+  const unique = allItems.filter(item => {
+    if (seen.has(item.link)) return false;
+    seen.add(item.link);
+    return true;
+  });
+
+  // Classify each item into west/iran/rucn based on domain
+  const west = [], iran = [], rucn = [], other = [];
+  for (const item of unique) {
+    const hoursAgo = parseRSSDate(item.pubDate);
+    if (hoursAgo > 72) continue;
+    // Try to get real URL from Google redirect
+    const realUrl = item.link;
+    const westSource = getDomainSource(realUrl, WESTERN_DOMAINS) || (item.sourceName && Object.values(WESTERN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
+    const iranSource = getDomainSource(realUrl, IRAN_DOMAINS) || (item.sourceName && Object.values(IRAN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
+    const rucnSource = getDomainSource(realUrl, RUCN_DOMAINS) || (item.sourceName && Object.values(RUCN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
+
+    const article = {
+      headline: item.title.replace(/\s*-\s*[^-]+$/, "").trim(), // strip " - Source Name" suffix
+      url: realUrl,
+      summary: item.summary || "",
+      age: item.pubDate,
+      hoursAgo,
+      source: westSource || iranSource || rucnSource || item.sourceName || "Google News",
+      fromRSS: true,
+    };
+
+    if (iranSource) iran.push(article);
+    else if (rucnSource) rucn.push(article);
+    else if (westSource) west.push(article);
+    else west.push(article); // default to west if unknown (Google News tends to surface western sources)
+  }
+
+  return { west, iran, rucn };
+}
+
+// ── Brave Search ──────────────────────────────────────────────────────────────
 async function braveSearch(query, braveKey, force = false) {
-  // Use pd1 (past 1 day) on force refresh for freshest results, pd3 otherwise
   const freshness = force ? "pd1" : "pd3";
   const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=3&freshness=${freshness}`;
   const res = await fetch(url, {
@@ -46,20 +190,18 @@ async function braveSearch(query, braveKey, force = false) {
       "Accept": "application/json",
       "Accept-Encoding": "gzip",
       "X-Subscription-Token": braveKey,
-      // Cache-Control busts Brave's own CDN cache on force refresh
       ...(force ? { "Cache-Control": "no-cache" } : {}),
     },
     signal: AbortSignal.timeout(4000),
   });
   if (!res.ok) return [];
   const data = await res.json();
-  // If pd1 returned nothing, fall back to pd3
   if (force && (!data.results || data.results.length === 0)) {
     const fallback = await fetch(
       `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=3&freshness=pd3`,
       { headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": braveKey }, signal: AbortSignal.timeout(4000) }
-    );
-    if (!fallback.ok) return [];
+    ).catch(() => null);
+    if (!fallback?.ok) return [];
     const fb = await fallback.json();
     return (fb.results || []).map(r => ({ headline: r.title || "", url: r.url || "", summary: r.description || "", age: r.age || r.page_age || "" }));
   }
@@ -110,20 +252,14 @@ async function scoreMomentum(articles, anthropicKey) {
     "3 = Neutral — diplomatic, economic, analytical, or unclear military impact",
     "4 = US/Israel making meaningful gains OR Iran/proxies suffering setbacks",
     "5 = US/Israel achieving major victory OR Iran/proxies suffering major losses",
-    "",
     "CRITICAL RULES:",
-    "- First ask: WHO is performing the action? WHO suffers the consequence?",
-    "- Israeli/US strikes ON Iran = score 4 or 5 (bad for Iran)",
-    "- Iranian/proxy strikes ON Israel/US = score 1 or 2 (good for Iran)",
+    "- Israeli/US strikes ON Iran = score 4 or 5",
+    "- Iranian/proxy strikes ON Israel/US = score 1 or 2",
     "- Iran being hit, bombed, killed, struck, destroyed = score 4 or 5",
     "- Iran hitting, striking, destroying enemy targets = score 1 or 2",
-    "- Iran firing missiles (regardless of interception) = score 2",
-    "- Iranian assets sunk/destroyed/killed = score 4 or 5",
-    "- Diplomatic, opinion, economic, domestic political articles = score 3",
+    "- Diplomatic, opinion, economic articles = score 3",
     "Return ONLY JSON array: [{\"i\":0,\"m\":3}]",
-    "",
-    "Headlines:",
-    list,
+    "Headlines:", list,
   ].join("\n");
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -138,40 +274,76 @@ async function scoreMomentum(articles, anthropicKey) {
     const clean = text.replace(/```[\w]*\n?/g,"").replace(/```/g,"").trim();
     const scores = JSON.parse(clean.match(/\[[\s\S]*\]/)?.[0] || "[]");
     return articles.map((a, i) => { const s = scores.find(x => x.i === i); return { ...a, momentum: s?.m ?? 3 }; });
-  } catch(e) { return articles.map(a => ({ ...a, momentum: 3 })); }
+  } catch { return articles.map(a => ({ ...a, momentum: 3 })); }
 }
 
-async function fetchSide(side, braveKey, force = false) {
+async function fetchBraveSide(side, braveKey, force = false) {
   const results = await Promise.all(
-    SOURCES[side].map(async ({ name, query }) => {
+    BRAVE_SOURCES[side].map(async ({ name, query }) => {
       const articles = await braveSearch(query, braveKey, force).catch(() => []);
       return articles.map(a => ({ ...a, source: name }));
     })
   );
-  const flat = results.flat().map(a => ({ ...a, hoursAgo: parseAgeToHours(a.age) }))
+  return results.flat().map(a => ({ ...a, hoursAgo: parseAgeToHours(a.age) }))
     .filter(a => a.hoursAgo <= 72 && a.headline.length > 5);
-  if (!flat.length) return [];
-  const categorised = categoriseArticles(flat);
-  return categorised.map(a => {
-    const bonus = a.hoursAgo <= 3 ? 3 : a.hoursAgo <= 12 ? 2 : a.hoursAgo <= 24 ? 1 : a.hoursAgo <= 48 ? 0 : -1;
-    return { ...a, score: Math.max(1, Math.min(7, a.score + bonus)) };
-  }).sort((a, b) => a.hoursAgo - b.hoursAgo);
+}
+
+// Merge RSS + Brave, deduplicate by URL and similar headlines
+function mergeAndDedupe(rssArticles, braveArticles) {
+  const seen = new Set();
+  const all = [];
+
+  // RSS first (fresher)
+  for (const a of rssArticles) {
+    const key = a.url || a.headline.toLowerCase().slice(0, 60);
+    if (!seen.has(key)) { seen.add(key); all.push(a); }
+  }
+  // Brave fills gaps
+  for (const a of braveArticles) {
+    const key = a.url || a.headline.toLowerCase().slice(0, 60);
+    if (!seen.has(key)) { seen.add(key); all.push(a); }
+  }
+  return all;
 }
 
 async function fetchAllSides(braveKey, anthropicKey, force = false) {
-  const [west, iran, rucn] = await Promise.all([
-    fetchSide("west", braveKey, force).catch(() => []),
-    fetchSide("iran", braveKey, force).catch(() => []),
-    fetchSide("rucn", braveKey, force).catch(() => []),
+  // Fetch RSS and all Brave sides in parallel
+  const [rssData, braveWest, braveIran, braveRucn] = await Promise.all([
+    fetchGoogleNewsRSS().catch(() => ({ west: [], iran: [], rucn: [] })),
+    fetchBraveSide("west", braveKey, force).catch(() => []),
+    fetchBraveSide("iran", braveKey, force).catch(() => []),
+    fetchBraveSide("rucn", braveKey, force).catch(() => []),
   ]);
+
+  // Merge RSS + Brave per side
+  const westRaw  = mergeAndDedupe(rssData.west,  braveWest);
+  const iranRaw  = mergeAndDedupe(rssData.iran,  braveIran);
+  const rucnRaw  = mergeAndDedupe(rssData.rucn,  braveRucn);
+
+  // Categorise
+  const applyScoring = (articles) => {
+    const categorised = categoriseArticles(articles);
+    return categorised.map(a => {
+      const bonus = a.hoursAgo <= 1 ? 4 : a.hoursAgo <= 3 ? 3 : a.hoursAgo <= 12 ? 2 : a.hoursAgo <= 24 ? 1 : a.hoursAgo <= 48 ? 0 : -1;
+      return { ...a, score: Math.max(1, Math.min(7, a.score + bonus)) };
+    }).sort((a, b) => (a.hoursAgo ?? 999) - (b.hoursAgo ?? 999));
+  };
+
+  const west = applyScoring(westRaw);
+  const iran = applyScoring(iranRaw);
+  const rucn = applyScoring(rucnRaw);
+
+  // Score momentum in one Claude call
   const allArticles = [...west, ...iran, ...rucn];
   const scored = await scoreMomentum(allArticles, anthropicKey);
   const wLen = west.length, iLen = iran.length;
+
   return {
     west: scored.slice(0, wLen),
     iran: scored.slice(wLen, wLen + iLen),
     rucn: scored.slice(wLen + iLen),
     cachedAt: Date.now(),
+    rssCount: rssData.west.length + rssData.iran.length + rssData.rucn.length,
   };
 }
 
@@ -191,12 +363,13 @@ export default async function handler(req, res) {
         cachedAt: cache.cachedAt ? new Date(cache.cachedAt).toISOString() : null,
         cacheAgeSeconds: cache.cachedAt ? Math.round((Date.now() - cache.cachedAt) / 1000) : null,
         articleCounts: cache.data ? { west: cache.data.west?.length || 0, iran: cache.data.iran?.length || 0, rucn: cache.data.rucn?.length || 0 } : null,
+        rssCount: cache.data?.rssCount ?? 0,
       });
     }
+    // Test RSS only
     try {
-      const src = SOURCES.west[0];
-      const articles = await braveSearch(src.query, braveKey, true);
-      return res.status(200).json({ source: src.name, raw: articles });
+      const rss = await fetchGoogleNewsRSS();
+      return res.status(200).json({ rssWest: rss.west.slice(0,3), rssIran: rss.iran.slice(0,3), rssRucn: rss.rucn.slice(0,3), totalRSS: rss.west.length + rss.iran.length + rss.rucn.length });
     } catch(e) { return res.status(500).json({ error: e.message }); }
   }
 
@@ -211,10 +384,7 @@ export default async function handler(req, res) {
     }
   }
 
-  if (!force && !stale && cache.data) {
-    res.setHeader("X-Cache", "HIT");
-    return res.status(200).json(cache.data);
-  }
+  if (!force && !stale && cache.data) { res.setHeader("X-Cache", "HIT"); return res.status(200).json(cache.data); }
   if (!force && stale && cache.data && !cache.inFlight) {
     res.setHeader("X-Cache", "STALE");
     cache.inFlight = fetchAllSides(braveKey, anthropicKey, false)
@@ -222,15 +392,11 @@ export default async function handler(req, res) {
       .catch(() => { cache.inFlight = null; });
     return res.status(200).json(cache.data);
   }
-  if (!force && cache.inFlight && cache.data) {
-    res.setHeader("X-Cache", "STALE-INFLIGHT");
-    return res.status(200).json(cache.data);
-  }
+  if (!force && cache.inFlight && cache.data) { res.setHeader("X-Cache", "STALE-INFLIGHT"); return res.status(200).json(cache.data); }
 
   try {
     res.setHeader("X-Cache", "MISS");
     lastFetchStarted = Date.now();
-    // Pass force=true so Brave uses pd1 freshness + no-cache header
     const data = await fetchAllSides(braveKey, anthropicKey, force);
     cache = { data, cachedAt: Date.now(), inFlight: null };
     return res.status(200).json(data);
