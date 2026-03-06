@@ -308,12 +308,25 @@ function headlineFingerprint(h) {
     .sort()
     .join(" ");
 }
+function extractQuotedPhrases(h) {
+  const matches = [];
+  // Match both curly and straight quotes
+  const re = /[‘’'"\u201c\u201d]([^\u2018\u2019\'\"“”]{4,})[‘’'"\u201c\u201d]/g;
+  let m;
+  while ((m = re.exec(h)) !== null) matches.push(m[1].toLowerCase().trim());
+  return matches;
+}
 function isSimilar(a, b) {
-  const fa = headlineFingerprint(a).split(" ");
-  const fb = new Set(headlineFingerprint(b).split(" "));
+  // If both headlines contain the same quoted phrase, they're the same story
+  const qa = extractQuotedPhrases(a);
+  const qb = extractQuotedPhrases(b);
+  if (qa.length && qb.length && qa.some(p => qb.some(q => p === q || p.includes(q) || q.includes(p)))) return true;
+  // Otherwise use keyword overlap with a slightly lower threshold
+  const fa = headlineFingerprint(a).split(" ").filter(Boolean);
+  const fb = new Set(headlineFingerprint(b).split(" ").filter(Boolean));
   if (!fa.length || !fb.size) return false;
   const overlap = fa.filter(w => fb.has(w)).length;
-  return overlap / Math.min(fa.length, fb.size) > 0.5;
+  return overlap / Math.min(fa.length, fb.size) > 0.45;
 }
 
 // Merge RSS + Brave, deduplicate by URL and fuzzy headline similarity
