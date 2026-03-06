@@ -92,8 +92,8 @@ function PriceTicker({ prices, loading, isMobile }) {
   );
 }
 
-// ── ReasonTooltip ──────────────────────────────────────────────────────────────
-function ReasonTooltip({ signal, reason }) {
+// ── MomentumTooltip ────────────────────────────────────────────────────────
+function MomentumTooltip({ label, color, reason }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
@@ -103,17 +103,17 @@ function ReasonTooltip({ signal, reason }) {
     return () => { document.removeEventListener("click", close); document.removeEventListener("touchstart", close); };
   }, [open]);
   return (
-    <div style={{ position: "relative", flex: 1 }}>
-      <div
-        style={{ fontSize: "8.5px", color: signal.color, fontFamily: "sans-serif", fontStyle: "italic", cursor: reason ? "pointer" : "default", userSelect: "none" }}
+    <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+      <span
+        style={{ fontSize: "8.5px", color, fontFamily: "sans-serif", fontWeight: 700, letterSpacing: "0.04em", cursor: reason ? "pointer" : "default", userSelect: "none" }}
         onClick={e => { if (reason) { e.stopPropagation(); setOpen(o => !o); } }}
         onMouseEnter={() => { if (reason && window.matchMedia("(hover: hover)").matches) setOpen(true); }}
         onMouseLeave={() => { if (window.matchMedia("(hover: hover)").matches) setOpen(false); }}
       >
-        {signal.text}{reason ? " ⓘ" : ""}
-      </div>
+        {label}{reason ? " ⓘ" : ""}
+      </span>
       {reason && open && (
-        <div onClick={e => e.stopPropagation()} style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, background: "#1a1a1a", border: "1px solid #444", borderRadius: "6px", padding: "10px 12px", fontSize: "12px", color: "#ddd", fontFamily: "sans-serif", fontStyle: "normal", lineHeight: 1.6, width: "min(320px, 80vw)", zIndex: 100, boxShadow: "0 4px 16px rgba(0,0,0,0.6)" }}>
+        <div onClick={e => e.stopPropagation()} style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, background: "#1a1a1a", border: "1px solid #444", borderRadius: "6px", padding: "10px 12px", fontSize: "12px", color: "#ddd", fontFamily: "sans-serif", fontStyle: "normal", lineHeight: 1.6, width: "min(320px, 80vw)", zIndex: 100, boxShadow: "0 4px 16px rgba(0,0,0,0.6)" }}>
           {reason}
         </div>
       )}
@@ -159,7 +159,7 @@ function MomentumBanner({ sentiment, brentChange, reason }) {
             return <div key={n} style={{ width: "7px", height: "7px", borderRadius: "50%", background: filled ? momentumColor : "#333" }} />;
           })}
         </div>
-        <span style={{ fontSize: "8.5px", color: momentumColor, fontFamily: "sans-serif", fontWeight: 700, letterSpacing: "0.04em" }}>{momentumLabel}</span>
+        <MomentumTooltip label={momentumLabel} color={momentumColor} reason={reason} />
       </div>
 
       {/* Divider */}
@@ -174,8 +174,8 @@ function MomentumBanner({ sentiment, brentChange, reason }) {
       </div>
       <div style={{ width: "1px", height: "14px", background: "#333", flexShrink: 0 }} />
 
-      {/* Combined signal — always shown, tap/hover for reason */}
-      <ReasonTooltip signal={signal} reason={reason} />
+      {/* Combined signal */}
+      <div style={{ fontSize: "8.5px", color: signal.color, fontFamily: "sans-serif", fontStyle: "italic", flex: 1 }}>{signal.text}</div>
     </div>
   );
 }
