@@ -248,6 +248,8 @@ async function scoreMomentum(articles, anthropicKey) {
     "MILITARY — always directional, never 3:",
     "- Strikes ON Iran/proxies = 4 or 5. Strikes BY Iran/proxies = 1 or 2.",
     "- Iran casualties/destroyed/killed = 4. US/Israel casualties = 1 or 2.",
+    "- High death toll IN Iran, deaths IN Tehran = 4. High death toll IN Israel/US bases = 1 or 2.",
+    "- Iran losing soldiers, commanders, ships, aircraft = 4. Israel/US losing these = 1 or 2.",
     "DIPLOMATIC — read direction:",
     "- US/EU sanctions on Iran, Iran denied access, Iran isolated = 4",
     "- Iran enriching uranium, Iran defiant, Iran threatening = 2",
