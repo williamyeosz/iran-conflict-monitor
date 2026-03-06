@@ -1,16 +1,21 @@
 // api/summaries.js — resolve redirects lazily, then fetch + summarise
 
-// Follow redirects to get real article URL (handles Google News redirects)
+// Follow Google News redirects using GET — HEAD doesn't trigger the redirect chain
 async function resolveUrl(url) {
   if (!url || !url.includes("news.google.com")) return url;
   try {
     const res = await fetch(url, {
-      method: "HEAD",
+      method: "GET",
       redirect: "follow",
-      signal: AbortSignal.timeout(4000),
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(5000),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
     });
-    return res.url || url;
+    const finalUrl = res.url || url;
+    return finalUrl.includes("news.google.com") ? url : finalUrl;
   } catch { return url; }
 }
 
@@ -94,11 +99,14 @@ export default async function handler(req, res) {
   // Step 2: fetch article content from real URLs in parallel
   const texts = await Promise.all(resolvedUrls.map(url => fetchPartialText(url)));
 
-  // Step 3: enrich with fetched content or fall back to snippet
+  // Step 3: enrich with fetched content, snippet, or headline as last resort
   const enriched = articles.map((a, i) => {
     const fetched = texts[i];
-    const content = (fetched && fetched.length > (a.summary?.length || 0) * 1.5)
-      ? fetched : (a.summary || "(no content available)");
+    const content = (fetched && fetched.length > 150)
+      ? fetched
+      : (a.summary && a.summary.length > 30)
+        ? a.summary
+        : null; // no fallback — skip if no content available
     return { ...a, content };
   });
 
