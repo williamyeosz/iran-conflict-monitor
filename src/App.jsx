@@ -335,14 +335,14 @@ export default function App() {
       else setLastUpdated(new Date());
       // Compute momentum from Claude-scored articles
       const allArticles = [...(data.west||[]), ...(data.iran||[]), ...(data.rucn||[])];
-      const now12  = allArticles.filter(a => (a.hoursAgo||99) <= 12  && a.momentum != null);
-      const prev12 = allArticles.filter(a => (a.hoursAgo||99) > 12  && (a.hoursAgo||99) <= 24 && a.momentum != null);
-      const avg = arr => arr.length ? arr.reduce((s, a) => s + a.momentum, 0) / arr.length : null;
-      const m0 = avg(now12), m1 = avg(prev12);
-      // Use recent average, adjusted by trend vs previous period
-      const base = m0 ?? avg(allArticles.filter(a => a.momentum != null)) ?? 3;
-      const trend = (m0 != null && m1 != null) ? (m0 - m1) * 0.5 : 0;
-      setSentiment(Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2)));
+     const scored = allArticles.filter(a => a.momentum != null && a.momentum !== 3);
+const now6  = scored.filter(a => (a.hoursAgo||99) <= 6);
+const prev6 = scored.filter(a => (a.hoursAgo||99) > 6 && (a.hoursAgo||99) <= 12);
+const avg = arr => arr.length ? arr.reduce((s, a) => s + a.momentum, 0) / arr.length : null;
+const m0 = avg(now6), m1 = avg(prev6);
+const base = m0 ?? avg(scored) ?? 3;
+const trend = (m0 != null && m1 != null) ? (m0 - m1) * 0.5 : 0;
+setSentiment(Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2)));
     } catch(e) {
       if (e.isCooldown) {
         // Show cooldown message on active tab only, don't wipe existing articles
