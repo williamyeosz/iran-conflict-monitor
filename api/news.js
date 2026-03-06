@@ -260,10 +260,9 @@ async function scoreMomentum(articles, anthropicKey) {
     "- Brent moves with no stated conflict cause = 3",
     "RULE: Only score 3 when there is genuinely zero directional signal.",
     "When uncertain between 2/3 choose 2. When uncertain between 3/4 choose 4.",
-    "Also return a \"reason\" field as the LAST element. Base it ONLY on the average momentum score of the articles.",
-    "RULES: (1) Be factual — state what happened, not who is winning. (2) No editorialising or loaded words like dominated, decisively, overwhelmingly, degraded. (3) Match the score: average score 1-2 = Iran made gains, average 4-5 = US/Israel made gains, ~3 = mixed. (4) One sentence, max 20 words, cite 2 specific events.",
-    "If score ~3 neutral: describe the most significant event from each side briefly.",
-    "Do NOT reference headline numbers. Do NOT use words like dominant, decisive, overwhelmingly.",
+    "Also return a \"reason\" field as the LAST element. Base it ONLY on the MOST RECENT headlines (those published in the last few hours, i.e. lowest index numbers which appear first in the list).",
+    "RULES: (1) Report facts, not conclusions. (2) Attribute claims to their source: say US claims, Israel says, Iran reports, according to war monitor — never state contested claims as fact. (3) No loaded adjectives: no dominated, decisively, overwhelmingly, degraded, devastating, ineffective, crippled. (4) If recent scores lean 1-2: lead with Iran-attributed actions. If 4-5: lead with US/Israel-attributed actions. If ~3: one attributed fact per side. (5) One sentence, max 25 words.",
+    "Do NOT reference headline numbers or indices. Do NOT editorialize. Do NOT state military assessments as facts.",
     "Return ONLY JSON array ending with reason: [{\"i\":0,\"m\":4},{\"reason\":\"...\"}]",
     "Headlines:", list,
   ].join("\n");

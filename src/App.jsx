@@ -359,19 +359,19 @@ export default function App() {
       });
       if (data.cachedAt) setLastUpdated(new Date(data.cachedAt));
       else setLastUpdated(new Date());
-      // Compute momentum from Claude-scored articles — exclude neutrals (score 3)
-      const allArticles = [...(data.west||[]), ...(data.iran||[]), ...(data.rucn||[])];
-      const nonNeutral = allArticles.filter(a => a.momentum != null && a.momentum !== 3);
-      const now6   = nonNeutral.filter(a => (a.hoursAgo||99) <= 6);
-      const prev6  = nonNeutral.filter(a => (a.hoursAgo||99) > 6 && (a.hoursAgo||99) <= 12);
-      const avg = arr => arr.length ? arr.reduce((s, a) => s + a.momentum, 0) / arr.length : null;
-      const m0 = avg(now6), m1 = avg(prev6);
-      // Use recent average, adjusted by trend vs previous period
-      console.log("[sentiment] now6:", now6.length, "avg:", m0, "prev6:", prev6.length, "avg:", m1);
-      const base = m0 ?? avg(nonNeutral) ?? 3;
-      const trend = (m0 != null && m1 != null) ? (m0 - m1) * 0.5 : 0;
-      setSentiment(Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2)));
-      if (data.sentimentReason) setSentimentReason(data.sentimentReason.replace(/\s*\(\d[\d,\s]*\)/g, "").replace(/\(headline[s]?[^)]*\)/gi, "").replace(/\s{2,}/g, " ").trim());
+         // Compute momentum only when all three tabs have data
+      if (data.west?.length && data.iran?.length && data.rucn?.length) {
+        const allArticles = [...data.west, ...data.iran, ...data.rucn];
+        const nonNeutral = allArticles.filter(a => a.momentum != null && a.momentum !== 3);
+        const now6   = nonNeutral.filter(a => (a.hoursAgo||99) <= 6);
+        const prev6  = nonNeutral.filter(a => (a.hoursAgo||99) > 6 && (a.hoursAgo||99) <= 12);
+        const avg = arr => arr.length ? arr.reduce((s, a) => s + a.momentum, 0) / arr.length : null;
+        const m0 = avg(now6), m1 = avg(prev6);
+        const base = m0 ?? avg(nonNeutral) ?? 3;
+        const trend = (m0 != null && m1 != null) ? (m0 - m1) * 0.5 : 0;
+        setSentiment(Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2)));
+        if (data.sentimentReason) setSentimentReason(data.sentimentReason.replace(/\s*\(\d[\d,\s]*\)/g, "").replace(/\(headline[s]?[^)]*\)/gi, "").replace(/\s{2,}/g, " ").trim());
+      }
     } catch(e) {
       if (e.isCooldown) {
         // Show cooldown message on active tab only, don't wipe existing articles
