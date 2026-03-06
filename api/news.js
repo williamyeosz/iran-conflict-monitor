@@ -13,6 +13,7 @@ const GNEWS_QUERIES = [
 ];
 
 // Western news sites mapped for source attribution from Google RSS
+// Approved western sources only — anything not in this list is dropped
 const WESTERN_DOMAINS = {
   "bbc.com": "BBC News", "bbc.co.uk": "BBC News",
   "reuters.com": "Reuters",
@@ -24,16 +25,6 @@ const WESTERN_DOMAINS = {
   "theguardian.com": "The Guardian",
   "timesofisrael.com": "Times of Israel",
   "npr.org": "NPR",
-  "washingtonpost.com": "Washington Post",
-  "wsj.com": "Wall Street Journal",
-  "axios.com": "Axios",
-  "politico.com": "Politico",
-  "nbcnews.com": "NBC News",
-  "abcnews.go.com": "ABC News",
-  "foxnews.com": "Fox News",
-  "thehill.com": "The Hill",
-  "haaretz.com": "Haaretz",
-  "jpost.com": "Jerusalem Post",
 };
 
 const IRAN_DOMAINS = {
@@ -185,7 +176,7 @@ async function fetchGoogleNewsRSS() {
     if (iranSource) iran.push(article);
     else if (rucnSource) rucn.push(article);
     else if (westSource) west.push(article);
-    else west.push(article);
+    // else: unknown source — drop it, don't add to any tab
   }
 
   return { west, iran, rucn };
