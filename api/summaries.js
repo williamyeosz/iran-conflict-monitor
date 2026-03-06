@@ -8,6 +8,7 @@ async function fetchPartialText(url) {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Range": "bytes=0-12000",
       },
+      redirect: "follow",
       signal: AbortSignal.timeout(2000),
     });
     if (!res.ok && res.status !== 206) return null;
