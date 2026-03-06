@@ -367,6 +367,7 @@ export default function App() {
       const avg = arr => arr.length ? arr.reduce((s, a) => s + a.momentum, 0) / arr.length : null;
       const m0 = avg(now6), m1 = avg(prev6);
       // Use recent average, adjusted by trend vs previous period
+      console.log("[sentiment] now6:", now6.length, "avg:", m0, "prev6:", prev6.length, "avg:", m1);
       const base = m0 ?? avg(nonNeutral) ?? 3;
       const trend = (m0 != null && m1 != null) ? (m0 - m1) * 0.5 : 0;
       setSentiment(Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2)));
