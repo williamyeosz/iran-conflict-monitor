@@ -260,7 +260,8 @@ async function scoreMomentum(articles, anthropicKey) {
     "- Brent moves with no stated conflict cause = 3",
     "RULE: Only score 3 when there is genuinely zero directional signal.",
     "When uncertain between 2/3 choose 2. When uncertain between 3/4 choose 4.",
-    "Return ONLY JSON array: [{\"i\":0,\"m\":4}]",
+    "Also return a \"reason\" field as the LAST element: {\"reason\": \"one sentence explaining why momentum favors that side, citing 1-2 specific headlines\"}",
+    "Return ONLY JSON array ending with reason: [{\"i\":0,\"m\":4},{\"reason\":\"...\"}]",
     "Headlines:", list,
   ].join("\n");
   try {
@@ -275,8 +276,10 @@ async function scoreMomentum(articles, anthropicKey) {
     const text = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
     const clean = text.replace(/```[\w]*\n?/g,"").replace(/```/g,"").trim();
     const scores = JSON.parse(clean.match(/\[[\s\S]*\]/)?.[0] || "[]");
-    return articles.map((a, i) => { const s = scores.find(x => x.i === i); return { ...a, momentum: s?.m ?? 3 }; });
-  } catch { return articles.map(a => ({ ...a, momentum: 3 })); }
+    const reasonObj = scores.find(x => x.reason);
+    const reason = reasonObj?.reason || null;
+    return { articles: articles.map((a, i) => { const s = scores.find(x => x.i === i); return { ...a, momentum: s?.m ?? 3 }; }), reason };
+  } catch { return { articles: articles.map(a => ({ ...a, momentum: 3 })), reason: null }; }
 }
 
 async function fetchBraveSide(side, braveKey, force = false) {
@@ -365,10 +368,11 @@ async function fetchAllSides(braveKey, anthropicKey, force = false) {
 
   // Score momentum in one Claude call
   const allArticles = [...west, ...iran, ...rucn];
-  const scored = await scoreMomentum(allArticles, anthropicKey);
+  const { articles: scored, reason: sentimentReason } = await scoreMomentum(allArticles, anthropicKey);
   const wLen = west.length, iLen = iran.length;
 
   return {
+    sentimentReason,
     west: scored.slice(0, wLen),
     iran: scored.slice(wLen, wLen + iLen),
     rucn: scored.slice(wLen + iLen),

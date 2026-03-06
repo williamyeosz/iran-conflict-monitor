@@ -7,7 +7,7 @@ const CAT_COLORS = {
   Political: "#6c3483", Economic: "#1e8449", Oil: "#ca6f1e",
 };
 const SIDE_CONFIG = {
-  west: { label: "Western & International", short: "Western & Intl",  color: "#1a3a6b", dot: "#2e6da4", subtitle: "BBC · CNN · AP · Reuters · NYT · CBS · NPR · Al Jazeera · Guardian · Times of Israel" },
+  west: { label: "Western & International", short: "Western & Intl",  color: "#1a3a6b", dot: "#2e6da4", subtitle: "BBC · Reuters · NYT · NPR · Al Jazeera · Guardian · Times of Israel" },
   iran: { label: "Iran & Pro-Iran Media",   short: "Iran & Pro-Iran", color: "#1a5c38", dot: "#27a05a", subtitle: "Press TV · Al Mayadeen · IRNA · Tasnim · Mehr · Tehran Times" },
   rucn: { label: "Russia & China",          short: "Russia & China",  color: "#6b1a1a", dot: "#c0392b", subtitle: "RT · Sputnik · TASS · CGTN · Xinhua · Global Times" },
 };
@@ -92,8 +92,37 @@ function PriceTicker({ prices, loading, isMobile }) {
   );
 }
 
+// ── ReasonTooltip ──────────────────────────────────────────────────────────────
+function ReasonTooltip({ signal, reason }) {
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    document.addEventListener("click", close, { once: true });
+    document.addEventListener("touchstart", close, { once: true });
+    return () => { document.removeEventListener("click", close); document.removeEventListener("touchstart", close); };
+  }, [open]);
+  return (
+    <div style={{ position: "relative", flex: 1 }}>
+      <div
+        style={{ fontSize: "8.5px", color: signal.color, fontFamily: "sans-serif", fontStyle: "italic", cursor: reason ? "pointer" : "default", userSelect: "none" }}
+        onClick={e => { if (reason) { e.stopPropagation(); setOpen(o => !o); } }}
+        onMouseEnter={() => { if (reason && window.matchMedia("(hover: hover)").matches) setOpen(true); }}
+        onMouseLeave={() => { if (window.matchMedia("(hover: hover)").matches) setOpen(false); }}
+      >
+        {signal.text}{reason ? " ⓘ" : ""}
+      </div>
+      {reason && open && (
+        <div onClick={e => e.stopPropagation()} style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, background: "#1a1a1a", border: "1px solid #444", borderRadius: "6px", padding: "10px 12px", fontSize: "12px", color: "#ddd", fontFamily: "sans-serif", fontStyle: "normal", lineHeight: 1.6, width: "min(320px, 80vw)", zIndex: 100, boxShadow: "0 4px 16px rgba(0,0,0,0.6)" }}>
+          {reason}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MomentumBanner ────────────────────────────────────────────────────────
-function MomentumBanner({ sentiment, brentChange }) {
+function MomentumBanner({ sentiment, brentChange, reason }) {
   if (sentiment === null) return null;
 
   const momentumLabel = sentiment <= 1.5 ? "Iran Surging" : sentiment <= 2.5 ? "Iran Gaining" : sentiment >= 4.5 ? "US/Israel Surging" : sentiment >= 3.5 ? "US/Israel Gaining" : "Neutral";
@@ -101,16 +130,20 @@ function MomentumBanner({ sentiment, brentChange }) {
   const numFilled = sentiment === 1 ? 5 : sentiment === 2 ? 4 : sentiment === 3 ? 3 : sentiment === 4 ? 4 : 5;
 
   // Interpret the combination
-  const brentUp = brentChange > 0.5;
-  const brentDown = brentChange < -0.5;
+  const brentUp = brentChange > 0.3;
+  const brentDown = brentChange < -0.3;
   const iranGaining = sentiment <= 2.5;
   const usGaining = sentiment >= 3.5;
+  const neutral = sentiment > 2.5 && sentiment < 3.5;
 
   let signal = null;
-  if (iranGaining && brentUp)   signal = { text: "Iran gaining + Brent rising — supply disruption risk elevated", color: "#1a5c38", icon: "⚠" };
-  else if (usGaining && brentDown) signal = { text: "US/Israel dominant + Brent falling — supply disruption risk easing", color: "#1a3a6b", icon: "↓" };
-  else if (iranGaining && brentDown) signal = { text: "Iran gaining militarily but markets pricing in de-escalation", color: "#b7770d", icon: "~" };
-  else if (usGaining && brentUp) signal = { text: "US/Israel winning but Brent rising — Iran threatening oil routes", color: "#b7770d", icon: "~" };
+  if (iranGaining && brentUp)    signal = { text: "Iran gaining + Brent rising — supply disruption risk elevated", color: "#e06060" };
+  else if (usGaining && brentDown) signal = { text: "US/Israel dominant + Brent falling — supply disruption risk easing", color: "#5cb87a" };
+  else if (iranGaining && brentDown) signal = { text: "Iran gaining militarily but markets pricing in de-escalation", color: "#b7770d" };
+  else if (usGaining && brentUp) signal = { text: "US/Israel winning but Brent rising — Iran threatening oil routes", color: "#b7770d" };
+  else if (neutral && brentUp)   signal = { text: "Brent rising — markets pricing in supply disruption risk", color: "#b7770d" };
+  else if (neutral && brentDown) signal = { text: "Brent falling — markets see reduced supply disruption risk", color: "#5cb87a" };
+  else signal = { text: "Brent and momentum aligned — no divergence signal", color: "#555" };
 
   return (
     <div style={{ background: "#111", borderBottom: "1px solid #2a2a2a", padding: "6px 24px", display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
@@ -132,25 +165,17 @@ function MomentumBanner({ sentiment, brentChange }) {
       {/* Divider */}
       <div style={{ width: "1px", height: "14px", background: "#333", flexShrink: 0 }} />
 
-      {/* Brent change */}
-      {brentChange !== null && (
-        <>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
-            <span style={{ fontSize: "8.5px", color: "#666", fontFamily: "sans-serif", textTransform: "uppercase", letterSpacing: "0.08em" }}>Brent</span>
-            <span style={{ fontSize: "8.5px", fontFamily: "monospace", fontWeight: 700, color: brentUp ? "#5cb87a" : brentDown ? "#e06060" : "#888" }}>
-              {brentUp ? "▲" : brentDown ? "▼" : "–"}{Math.abs(brentChange).toFixed(1)}% today
-            </span>
-          </div>
-          <div style={{ width: "1px", height: "14px", background: "#333", flexShrink: 0 }} />
-        </>
-      )}
+      {/* Brent change — always shown */}
+      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+        <span style={{ fontSize: "8.5px", color: "#666", fontFamily: "sans-serif", textTransform: "uppercase", letterSpacing: "0.08em" }}>Brent</span>
+        <span style={{ fontSize: "8.5px", fontFamily: "monospace", fontWeight: 700, color: brentUp ? "#5cb87a" : brentDown ? "#e06060" : "#888" }}>
+          {brentChange === null ? "···" : `${brentUp ? "▲" : brentDown ? "▼" : "–"}${Math.abs(brentChange).toFixed(2)}% today`}
+        </span>
+      </div>
+      <div style={{ width: "1px", height: "14px", background: "#333", flexShrink: 0 }} />
 
-      {/* Combined signal */}
-      {signal && (
-        <div style={{ fontSize: "8.5px", color: signal.color, fontFamily: "sans-serif", fontStyle: "italic", flex: 1 }}>
-          {signal.icon} {signal.text}
-        </div>
-      )}
+      {/* Combined signal — always shown, tap/hover for reason */}
+      <ReasonTooltip signal={signal} reason={reason} />
     </div>
   );
 }
@@ -166,7 +191,7 @@ function NewsCard({ item, side, aiSummary, summaryLoading }) {
         <span style={{ fontSize: "9px", fontWeight: 700, letterSpacing: "0.1em", color: catColor, textTransform: "uppercase", fontFamily: "sans-serif" }}>{item.category}</span>
         <span style={{ fontSize: "10px", color: "#ccc" }}>·</span>
         <span style={{ fontSize: "10px", color: "#aaa", fontFamily: "monospace" }}>
-          {item.hoursAgo == null || item.hoursAgo >= 999 ? "" :
+          {!item.hoursAgo || item.hoursAgo >= 999 ? "" :
            item.hoursAgo < 1 ? "Just now" :
            item.hoursAgo < 24 ? `${Math.round(item.hoursAgo)}h ago` :
            item.hoursAgo < 48 ? "Yesterday" :
@@ -303,6 +328,7 @@ export default function App() {
   const [isMobile,      setIsMobile]      = useState(false);
   const [aiSummaries,   setAiSummaries]   = useState(false);
   const [sentiment,     setSentiment]     = useState(null);
+  const [sentimentReason, setSentimentReason] = useState(null);
   const [summaryCache,  setSummaryCache]  = useState({ west: {}, iran: {}, rucn: {} });
   const [summaryLoading,setSummaryLoading]= useState(false);
 
@@ -333,16 +359,17 @@ export default function App() {
       });
       if (data.cachedAt) setLastUpdated(new Date(data.cachedAt));
       else setLastUpdated(new Date());
-      // Compute momentum from Claude-scored articles
-      const allArticles = [...(data.west||[]), ...(data.iran||[]), ...(data.rucn||[])];
-     const scored = allArticles.filter(a => a.momentum != null && a.momentum !== 3);
-const now6  = scored.filter(a => (a.hoursAgo||99) <= 6);
-const prev6 = scored.filter(a => (a.hoursAgo||99) > 6 && (a.hoursAgo||99) <= 12);
-const avg = arr => arr.length ? arr.reduce((s, a) => s + a.momentum, 0) / arr.length : null;
-const m0 = avg(now6), m1 = avg(prev6);
-const base = m0 ?? avg(scored) ?? 3;
-const trend = (m0 != null && m1 != null) ? (m0 - m1) * 0.5 : 0;
-setSentiment(Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2)));
+      // Compute momentum from Claude-scored articles — exclude neutrals (score 3)
+      const nonNeutral = allArticles.filter(a => a.momentum != null && a.momentum !== 3);
+      const now12  = nonNeutral.filter(a => (a.hoursAgo||99) <= 12);
+      const prev12 = nonNeutral.filter(a => (a.hoursAgo||99) > 12 && (a.hoursAgo||99) <= 24);
+      const avg = arr => arr.length ? arr.reduce((s, a) => s + a.momentum, 0) / arr.length : null;
+      const m0 = avg(now12), m1 = avg(prev12);
+      // Use recent average, adjusted by trend vs previous period
+      const base = m0 ?? avg(nonNeutral) ?? 3;
+      const trend = (m0 != null && m1 != null) ? (m0 - m1) * 0.5 : 0;
+      setSentiment(Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2)));
+      if (data.sentimentReason) setSentimentReason(data.sentimentReason);
     } catch(e) {
       if (e.isCooldown) {
         // Show cooldown message on active tab only, don't wipe existing articles
@@ -415,7 +442,7 @@ setSentiment(Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2)));
       <PriceTicker prices={prices} loading={pricesLoading} isMobile={isMobile} />
       {/* Sticky header */}
       <div style={{ position: "sticky", top: 0, zIndex: 100, background: "#fff", borderBottom: "1px solid #ddd", boxShadow: "0 1px 6px rgba(0,0,0,0.06)" }}>
-        <MomentumBanner sentiment={sentiment} brentChange={brentChange} />
+        <MomentumBanner sentiment={sentiment} brentChange={brentChange} reason={sentimentReason} />
         <div style={{ maxWidth: "720px", margin: "0 auto", padding: isMobile ? "10px 16px 0" : "12px 24px 0" }}>
 
           {/* Title row — full width, no buttons */}
