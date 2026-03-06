@@ -7,12 +7,9 @@ const FETCH_COOLDOWN_MS = 5000;
 
 // Google News RSS queries — near real-time, no API key needed
 const GNEWS_QUERIES = [
-  { q: "Iran Israel war",          label: "Google News" },
-  { q: "Iran strike attack",       label: "Google News" },
-  { q: "Iran missile bomb",        label: "Google News" },
-  { q: "Iran US military",         label: "Google News" },
-  { q: "Iran nuclear deal sanction",label: "Google News" },
-  { q: "Tehran Beirut conflict",   label: "Google News" },
+  { q: "Iran war latest" },
+  { q: "Iran Israel strike" },
+  { q: "Tehran conflict" },
 ];
 
 // Western news sites mapped for source attribution from Google RSS
