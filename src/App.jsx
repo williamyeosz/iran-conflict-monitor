@@ -329,6 +329,7 @@ export default function App() {
   const [aiSummaries,   setAiSummaries]   = useState(false);
   const [sentiment,     setSentiment]     = useState(null);
   const [sentimentReason, setSentimentReason] = useState(null);
+  const [sentimentReasonMeta, setSentimentReasonMeta] = useState({ score: null, updatedAt: 0 });
   const [summaryCache,  setSummaryCache]  = useState({ west: {}, iran: {}, rucn: {} });
   const [summaryLoading,setSummaryLoading]= useState(false);
 
@@ -369,8 +370,20 @@ export default function App() {
         const m0 = avg(now6), m1 = avg(prev6);
         const base = m0 ?? avg(nonNeutral) ?? 3;
         const trend = (m0 != null && m1 != null) ? (m0 - m1) * 0.5 : 0;
-        setSentiment(Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2)));
-        if (data.sentimentReason) setSentimentReason(data.sentimentReason.replace(/\s*\(\d[\d,\s]*\)/g, "").replace(/\(headline[s]?[^)]*\)/gi, "").replace(/\s{2,}/g, " ").trim());
+        const newScore = Math.max(1, Math.min(5, Math.round((base + trend) * 2) / 2));
+        setSentiment(newScore);
+        if (data.sentimentReason) {
+          const cleanReason = data.sentimentReason.replace(/\s*\([\d,\s]+\)/g, "").replace(/\(headline[s]?[^)]*\)/gi, "").replace(/\bheadlines?\s+[\d,\s]+/gi, "").replace(/\s{2,}/g, " ").replace(/,\s*\./, ".").trim();
+          setSentimentReasonMeta(prev => {
+            const hourElapsed = Date.now() - prev.updatedAt > 60 * 60 * 1000;
+            const scoreMoved = prev.score === null || Math.abs(newScore - prev.score) >= 1;
+            if (hourElapsed || scoreMoved) {
+              setSentimentReason(cleanReason);
+              return { score: newScore, updatedAt: Date.now() };
+            }
+            return prev;
+          });
+        }
       }
     } catch(e) {
       if (e.isCooldown) {

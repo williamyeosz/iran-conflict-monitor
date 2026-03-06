@@ -237,7 +237,14 @@ function categoriseArticles(articles) {
 
 async function scoreMomentum(articles, anthropicKey) {
   if (!articles.length) return articles;
-  const list = articles.map((a, i) => i + ": [" + a.source + "] " + a.headline).join("\n");
+  // Put recent articles first so the reason prompt sees them as "most recent"
+  const sorted = [...articles].sort((a, b) => (a.hoursAgo||99) - (b.hoursAgo||99));
+  const list = sorted.map((a, i) => {
+    const tag = (a.hoursAgo||99) <= 6 ? " [RECENT]" : "";
+    return i + ": [" + a.source + tag + "] " + a.headline;
+  }).join("\n");
+  // Remap scores back to original indices
+  const sortedToOrig = sorted.map(a => articles.indexOf(a));
   const prompt = [
     "Score each headline for who is gaining momentum in the Iran conflict. Scale 1-5:",
     "1 = Iran/proxies achieving major victory OR US/Israel suffering major losses",
@@ -280,7 +287,11 @@ async function scoreMomentum(articles, anthropicKey) {
     const scores = JSON.parse(clean.match(/\[[\s\S]*\]/)?.[0] || "[]");
     const reasonObj = scores.find(x => x.reason);
     const reason = reasonObj?.reason || null;
-    return { articles: articles.map((a, i) => { const s = scores.find(x => x.i === i); return { ...a, momentum: s?.m ?? 3 }; }), reason };
+    return { articles: articles.map((a, origIdx) => {
+      const sortedIdx = sortedToOrig.indexOf(origIdx);
+      const s = scores.find(x => x.i === sortedIdx);
+      return { ...a, momentum: s?.m ?? 3 };
+    }), reason };
   } catch { return { articles: articles.map(a => ({ ...a, momentum: 3 })), reason: null }; }
 }
 
