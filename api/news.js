@@ -137,46 +137,38 @@ async function fetchGoogleNewsRSS() {
     return true;
   });
 
-  // Resolve Google redirect URLs to real article URLs in parallel
-  async function resolveUrl(googleUrl) {
-    try {
-      const res = await fetch(googleUrl, {
-        method: "HEAD",
-        redirect: "follow",
-        signal: AbortSignal.timeout(3000),
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)" },
-      });
-      return res.url || googleUrl;
-    } catch { return googleUrl; }
+  // Use Google's <source> tag name to match approved lists — no URL resolution needed
+  const WEST_NAMES = new Set(Object.values(WESTERN_DOMAINS));
+  const IRAN_NAMES = new Set(Object.values(IRAN_DOMAINS));
+  const RUCN_NAMES = new Set(Object.values(RUCN_DOMAINS));
+
+  function matchSource(sn, nameSet) {
+    if (!sn) return null;
+    const s = sn.toLowerCase();
+    return [...nameSet].find(n => s.includes(n.toLowerCase()) || n.toLowerCase().includes(s)) || null;
   }
 
-  const recent = unique.filter(item => parseRSSDate(item.pubDate) <= 72);
-  const resolvedUrls = await Promise.all(recent.map(item => resolveUrl(item.link)));
-
-  // Classify each item into west/iran/rucn based on resolved domain
   const west = [], iran = [], rucn = [];
-  for (let i = 0; i < recent.length; i++) {
-    const item = recent[i];
+  for (const item of unique) {
     const hoursAgo = parseRSSDate(item.pubDate);
-    const realUrl = resolvedUrls[i];
-    const westSource = getDomainSource(realUrl, WESTERN_DOMAINS) || (Object.values(WESTERN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
-    const iranSource = getDomainSource(realUrl, IRAN_DOMAINS)   || (Object.values(IRAN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
-    const rucnSource = getDomainSource(realUrl, RUCN_DOMAINS)   || (Object.values(RUCN_DOMAINS).includes(item.sourceName) ? item.sourceName : null);
-
+    if (hoursAgo > 72) continue;
+    const sn = item.sourceName || "";
+    const westSource = matchSource(sn, WEST_NAMES);
+    const iranSource = !westSource && matchSource(sn, IRAN_NAMES);
+    const rucnSource = !westSource && !iranSource && matchSource(sn, RUCN_NAMES);
+    if (!westSource && !iranSource && !rucnSource) continue; // drop unapproved sources
     const article = {
       headline: item.title.replace(/\s*-\s*[^-]+$/, "").trim(),
-      url: realUrl,
+      url: item.link,
       summary: "",
       age: item.pubDate,
       hoursAgo,
-      source: westSource || iranSource || rucnSource || item.sourceName || "Google News",
+      source: westSource || iranSource || rucnSource,
       fromRSS: true,
     };
-
     if (iranSource) iran.push(article);
     else if (rucnSource) rucn.push(article);
-    else if (westSource) west.push(article);
-    // else: unknown source — drop it, don't add to any tab
+    else west.push(article);
   }
 
   return { west, iran, rucn };
