@@ -113,7 +113,7 @@ function MomentumTooltip({ label, color, reason }) {
         {label}{reason ? " ⓘ" : ""}
       </span>
       {reason && open && (
-        <div onClick={e => e.stopPropagation()} style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, background: "#1a1a1a", border: "1px solid #444", borderRadius: "6px", padding: "10px 12px", fontSize: "12px", color: "#ddd", fontFamily: "sans-serif", fontStyle: "normal", lineHeight: 1.6, width: "min(320px, 80vw)", zIndex: 100, boxShadow: "0 4px 16px rgba(0,0,0,0.6)" }}>
+        <div onClick={e => e.stopPropagation()} style={{ position: "fixed", top: "60px", left: "12px", right: "12px", background: "#1a1a1a", border: "1px solid #444", borderRadius: "6px", padding: "10px 12px", fontSize: "12px", color: "#ddd", fontFamily: "sans-serif", fontStyle: "normal", lineHeight: 1.6, zIndex: 1000, boxShadow: "0 4px 16px rgba(0,0,0,0.6)" }}>
           {reason}
         </div>
       )}
