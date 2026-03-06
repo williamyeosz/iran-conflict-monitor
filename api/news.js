@@ -119,7 +119,7 @@ async function fetchGoogleNewsRSS() {
         const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
         const res = await fetch(url, {
           headers: { "User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)", "Accept": "application/rss+xml, application/xml, text/xml" },
-          signal: AbortSignal.timeout(6000),
+          signal: AbortSignal.timeout(4000),
         });
         if (!res.ok) return [];
         const xml = await res.text();
@@ -177,7 +177,7 @@ async function fetchGoogleNewsRSS() {
 // ── Brave Search ──────────────────────────────────────────────────────────────
 async function braveSearch(query, braveKey, force = false) {
   const freshness = force ? "pd1" : "pd3";
-  const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=3&freshness=${freshness}`;
+  const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=2&freshness=${freshness}`;
   const res = await fetch(url, {
     headers: {
       "Accept": "application/json",
@@ -185,13 +185,13 @@ async function braveSearch(query, braveKey, force = false) {
       "X-Subscription-Token": braveKey,
       ...(force ? { "Cache-Control": "no-cache" } : {}),
     },
-    signal: AbortSignal.timeout(4000),
+    signal: AbortSignal.timeout(2500),
   });
   if (!res.ok) return [];
   const data = await res.json();
   if (force && (!data.results || data.results.length === 0)) {
     const fallback = await fetch(
-      `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=3&freshness=pd3`,
+      `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=2&freshness=pd3`,
       { headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": braveKey }, signal: AbortSignal.timeout(4000) }
     ).catch(() => null);
     if (!fallback?.ok) return [];
@@ -239,19 +239,26 @@ async function scoreMomentum(articles, anthropicKey) {
   if (!articles.length) return articles;
   const list = articles.map((a, i) => i + ": [" + a.source + "] " + a.headline).join("\n");
   const prompt = [
-    "Score each headline for momentum in the Iran conflict on a scale 1-5:",
+    "Score each headline for who is gaining momentum in the Iran conflict. Scale 1-5:",
     "1 = Iran/proxies achieving major victory OR US/Israel suffering major losses",
-    "2 = Iran/proxies making meaningful gains OR US/Israel under meaningful pressure",
-    "3 = Neutral — diplomatic, economic, analytical, or unclear military impact",
-    "4 = US/Israel making meaningful gains OR Iran/proxies suffering setbacks",
+    "2 = Iran/proxies gaining OR Iran asserting/threatening/defying OR US/Israel under pressure",
+    "3 = GENUINELY neutral ONLY — both sides in dialogue with no clear winner, pure market data with no conflict cause",
+    "4 = US/Israel gaining OR Iran suffering setbacks OR Iran isolated/constrained/sanctioned",
     "5 = US/Israel achieving major victory OR Iran/proxies suffering major losses",
-    "CRITICAL RULES:",
-    "- Israeli/US strikes ON Iran = score 4 or 5",
-    "- Iranian/proxy strikes ON Israel/US = score 1 or 2",
-    "- Iran being hit, bombed, killed, struck, destroyed = score 4 or 5",
-    "- Iran hitting, striking, destroying enemy targets = score 1 or 2",
-    "- Diplomatic, opinion, economic articles = score 3",
-    "Return ONLY JSON array: [{\"i\":0,\"m\":3}]",
+    "MILITARY — always directional, never 3:",
+    "- Strikes ON Iran/proxies = 4 or 5. Strikes BY Iran/proxies = 1 or 2.",
+    "- Iran casualties/destroyed/killed = 4. US/Israel casualties = 1 or 2.",
+    "DIPLOMATIC — read direction:",
+    "- US/EU sanctions on Iran, Iran denied access, Iran isolated = 4",
+    "- Iran enriching uranium, Iran defiant, Iran threatening = 2",
+    "- Ceasefire both sides agree to = 3. Talks collapse = 2.",
+    "ECONOMIC:",
+    "- Iran economy hurting, oil exports blocked = 4",
+    "- Iran securing trade deals, bypassing sanctions = 2",
+    "- Brent moves with no stated conflict cause = 3",
+    "RULE: Only score 3 when there is genuinely zero directional signal.",
+    "When uncertain between 2/3 choose 2. When uncertain between 3/4 choose 4.",
+    "Return ONLY JSON array: [{\"i\":0,\"m\":4}]",
     "Headlines:", list,
   ].join("\n");
   try {
