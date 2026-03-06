@@ -360,11 +360,12 @@ export default function App() {
       if (data.cachedAt) setLastUpdated(new Date(data.cachedAt));
       else setLastUpdated(new Date());
       // Compute momentum from Claude-scored articles — exclude neutrals (score 3)
+      const allArticles = [...(data.west||[]), ...(data.iran||[]), ...(data.rucn||[])];
       const nonNeutral = allArticles.filter(a => a.momentum != null && a.momentum !== 3);
-      const now12  = nonNeutral.filter(a => (a.hoursAgo||99) <= 12);
-      const prev12 = nonNeutral.filter(a => (a.hoursAgo||99) > 12 && (a.hoursAgo||99) <= 24);
+      const now6   = nonNeutral.filter(a => (a.hoursAgo||99) <= 6);
+      const prev6  = nonNeutral.filter(a => (a.hoursAgo||99) > 6 && (a.hoursAgo||99) <= 12);
       const avg = arr => arr.length ? arr.reduce((s, a) => s + a.momentum, 0) / arr.length : null;
-      const m0 = avg(now12), m1 = avg(prev12);
+      const m0 = avg(now6), m1 = avg(prev6);
       // Use recent average, adjusted by trend vs previous period
       const base = m0 ?? avg(nonNeutral) ?? 3;
       const trend = (m0 != null && m1 != null) ? (m0 - m1) * 0.5 : 0;
