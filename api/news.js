@@ -1,19 +1,17 @@
-// api/news.js — Google News RSS (real-time) + Brave Search (coverage), Claude for momentum scoring
+// api/news.js -- Google News RSS (real-time) + Brave Search (coverage), Claude for momentum scoring
 
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 let cache = { data: null, cachedAt: 0, inFlight: null };
 let lastFetchStarted = 0;
 const FETCH_COOLDOWN_MS = 5000;
 
-// Google News RSS queries — near real-time, no API key needed
+// Google News RSS queries -- near real-time, no API key needed
 const GNEWS_QUERIES = [
   { q: "Iran war latest" },
   { q: "Iran Israel strike" },
   { q: "Tehran conflict" },
 ];
 
-// Western news sites mapped for source attribution from Google RSS
-// Approved western sources only — anything not in this list is dropped
 const WESTERN_DOMAINS = {
   "bbc.com": "BBC News", "bbc.co.uk": "BBC News",
   "reuters.com": "Reuters",
@@ -45,31 +43,23 @@ const RUCN_DOMAINS = {
   "globaltimes.cn": "Global Times",
 };
 
-// Brave sources as backup / for Iran & Russian sources
 const BRAVE_SOURCES = {
   west: [
     { name: "BBC News",        query: "Iran war site:bbc.com" },
-    { name: "Reuters",         query: "Iran war site:reuters.com" },
-    { name: "CNN",             query: "Iran war site:cnn.com" },
-    { name: "AP News",         query: "Iran war site:apnews.com" },
-    { name: "CBS News",        query: "Iran war site:cbsnews.com" },
-    { name: "New York Times",  query: "Iran war site:nytimes.com" },
-    { name: "Al Jazeera",      query: "Iran conflict site:aljazeera.com" },
-    { name: "The Guardian",    query: "Iran conflict site:theguardian.com" },
-    { name: "Times of Israel", query: "Iran war site:timesofisrael.com" },
-    { name: "NPR",             query: "Iran conflict site:npr.org" },
+    { name: "Reuters",         query: "Iran conflict site:reuters.com" },
+    { name: "AP News",         query: "Iran site:apnews.com" },
+    { name: "Al Jazeera",      query: "Iran war site:aljazeera.com" },
+    { name: "Times of Israel", query: "Iran site:timesofisrael.com" },
   ],
   iran: [
-    { name: "Press TV",        query: "Iran war site:presstv.ir" },
-    { name: "Al Mayadeen",     query: "Iran resistance site:almayadeen.net" },
-    { name: "IRNA",            query: "Iran site:irna.ir" },
+    { name: "Press TV",        query: "Iran conflict site:presstv.ir" },
+    { name: "Al Mayadeen",     query: "Iran war site:almayadeen.net" },
     { name: "Tehran Times",    query: "Iran site:tehrantimes.com" },
     { name: "Tasnim News",     query: "Iran site:tasnimnews.com" },
-    { name: "Mehr News",       query: "Iran site:mehrnews.com" },
   ],
   rucn: [
-    { name: "RT",              query: "Iran war site:rt.com" },
-    { name: "Sputnik",         query: "Iran war site:sputnikglobe.com" },
+    { name: "RT",              query: "Iran site:rt.com" },
+    { name: "Sputnik",         query: "Iran site:sputnikglobe.com" },
     { name: "TASS",            query: "Iran site:tass.com" },
     { name: "CGTN",            query: "Iran site:cgtn.com" },
     { name: "Xinhua",          query: "Iran site:english.news.cn" },
@@ -77,173 +67,112 @@ const BRAVE_SOURCES = {
   ],
 };
 
-// ── Google News RSS fetch ──────────────────────────────────────────────────────
+// ── Google News RSS ───────────────────────────────────────────────────────────
 function getDomainSource(url, domainMap) {
   try {
     const hostname = new URL(url).hostname.replace("www.", "");
     for (const [domain, name] of Object.entries(domainMap)) {
-      if (hostname.includes(domain)) return name;
+      if (hostname === domain || hostname.endsWith("." + domain)) return name;
     }
   } catch {}
   return null;
 }
 
 function parseRSSDate(dateStr) {
-  if (!dateStr) return 999;
-  try {
-    const ms = Date.now() - new Date(dateStr).getTime();
-    return Math.max(0, Math.round(ms / 3600000));
-  } catch { return 999; }
+  if (!dateStr) return null;
+  try { return new Date(dateStr); } catch { return null; }
 }
 
-// Parse Google News RSS XML — extract items with title, link, pubDate, source
 function parseRSSXML(xml) {
   const items = [];
-  const itemMatches = xml.matchAll(/<item>([\s\S]*?)<\/item>/g);
-  for (const match of itemMatches) {
-    const block = match[1];
-    const title   = (block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || block.match(/<title>(.*?)<\/title>/))?.[1]?.trim() || "";
-    const link    = (block.match(/<link>(.*?)<\/link>/) || block.match(/<feedburner:origLink>(.*?)<\/feedburner:origLink>/))?.[1]?.trim() || "";
-    const pubDate = block.match(/<pubDate>(.*?)<\/pubDate>/)?.[1]?.trim() || "";
-    const sourceName = block.match(/<source[^>]*>(.*?)<\/source>/)?.[1]?.trim() || "";
-    // Google RSS descriptions are just the headline as an <a> tag — not useful, ignore them
-    if (title && link) items.push({ title, link, pubDate, sourceName, summary: "" });
+  const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+  let m;
+  while ((m = itemRegex.exec(xml)) !== null) {
+    const inner = m[1];
+    const title = (inner.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || inner.match(/<title>(.*?)<\/title>/))?.[1]?.trim();
+    const link  = (inner.match(/<link>(.*?)<\/link>/))?.[1]?.trim();
+    const pubDate = (inner.match(/<pubDate>(.*?)<\/pubDate>/))?.[1]?.trim();
+    const desc = (inner.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/) || inner.match(/<description>(.*?)<\/description>/))?.[1]?.trim();
+    if (title && link) items.push({ title, link, pubDate, desc });
   }
   return items;
 }
 
 async function fetchGoogleNewsRSS() {
-  const results = await Promise.all(
-    GNEWS_QUERIES.map(async ({ q }) => {
-      try {
-        const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
-        const res = await fetch(url, {
-          headers: { "User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)", "Accept": "application/rss+xml, application/xml, text/xml" },
-          signal: AbortSignal.timeout(4000),
-        });
-        if (!res.ok) return [];
-        const xml = await res.text();
-        return parseRSSXML(xml);
-      } catch { return []; }
-    })
-  );
-
-  const allItems = results.flat();
-  // Deduplicate by URL
-  const seen = new Set();
-  const unique = allItems.filter(item => {
-    if (seen.has(item.link)) return false;
-    seen.add(item.link);
-    return true;
-  });
-
-  // Use Google's <source> tag name to match approved lists — no URL resolution needed
-  const WEST_NAMES = new Set(Object.values(WESTERN_DOMAINS));
-  const IRAN_NAMES = new Set(Object.values(IRAN_DOMAINS));
-  const RUCN_NAMES = new Set(Object.values(RUCN_DOMAINS));
-
-  function matchSource(sn, nameSet) {
-    if (!sn) return null;
-    const s = sn.toLowerCase();
-    return [...nameSet].find(n => s.includes(n.toLowerCase()) || n.toLowerCase().includes(s)) || null;
-  }
-
-  const west = [], iran = [], rucn = [];
-  for (const item of unique) {
-    const hoursAgo = parseRSSDate(item.pubDate);
-    if (hoursAgo > 72) continue;
-    const sn = item.sourceName || "";
-    const westSource = matchSource(sn, WEST_NAMES);
-    const iranSource = !westSource && matchSource(sn, IRAN_NAMES);
-    const rucnSource = !westSource && !iranSource && matchSource(sn, RUCN_NAMES);
-    if (!westSource && !iranSource && !rucnSource) continue; // drop unapproved sources
-    const article = {
-      headline: item.title.replace(/\s*-\s*[^-]+$/, "").trim(),
-      url: item.link,
-      summary: "",
-      age: item.pubDate,
-      hoursAgo,
-      source: westSource || iranSource || rucnSource,
-      fromRSS: true,
-    };
-    if (iranSource) iran.push(article);
-    else if (rucnSource) rucn.push(article);
-    else west.push(article);
-  }
-
-  return { west, iran, rucn };
+  const allItems = [];
+  await Promise.all(GNEWS_QUERIES.map(async ({ q }) => {
+    try {
+      const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) return;
+      const xml = await res.text();
+      allItems.push(...parseRSSXML(xml));
+    } catch {}
+  }));
+  return allItems;
 }
 
 // ── Brave Search ──────────────────────────────────────────────────────────────
 async function braveSearch(query, braveKey, force = false) {
-  const freshness = force ? "pd1" : "pd3";
-  const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=2&freshness=${freshness}`;
-  const res = await fetch(url, {
-    headers: {
-      "Accept": "application/json",
-      "Accept-Encoding": "gzip",
-      "X-Subscription-Token": braveKey,
-      ...(force ? { "Cache-Control": "no-cache" } : {}),
-    },
-    signal: AbortSignal.timeout(2500),
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
-  if (force && (!data.results || data.results.length === 0)) {
-    const fallback = await fetch(
-      `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=2&freshness=pd3`,
-      { headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": braveKey }, signal: AbortSignal.timeout(4000) }
-    ).catch(() => null);
-    if (!fallback?.ok) return [];
-    const fb = await fallback.json();
-    return (fb.results || []).map(r => ({ headline: r.title || "", url: r.url || "", summary: r.description || "", age: r.age || r.page_age || "" }));
+  const cacheKey = `brave:${query}`;
+  if (!force && braveSearch._cache?.[cacheKey]) {
+    const { data, at } = braveSearch._cache[cacheKey];
+    if (Date.now() - at < CACHE_TTL_MS) return data;
   }
-  return (data.results || []).map(r => ({ headline: r.title || "", url: r.url || "", summary: r.description || "", age: r.age || r.page_age || "" }));
+  const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=10&freshness=pd`;
+  const res = await fetch(url, {
+    headers: { "Accept": "application/json", "X-Subscription-Token": braveKey },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`Brave ${res.status}`);
+  const json = await res.json();
+  const results = (json.results || []).map(r => ({
+    headline: r.title,
+    url: r.url,
+    summary: r.description || "",
+    age: r.age || "",
+  }));
+  braveSearch._cache = braveSearch._cache || {};
+  braveSearch._cache[cacheKey] = { data: results, at: Date.now() };
+  return results;
 }
 
 function parseAgeToHours(age) {
-  if (!age) return 999;
-  if (typeof age === "number") return age;
-  const s = age.toLowerCase();
-  const num = parseInt(s);
-  if (isNaN(num)) return 999;
-  if (s.includes("minute")) return Math.round(num / 60);
-  if (s.includes("hour")) return num;
-  if (s.includes("day")) return num * 24;
-  if (s.includes("week")) return num * 168;
-  try {
-    const ms = Date.now() - new Date(age).getTime();
-    return Math.round(ms / 3600000);
-  } catch { return 999; }
+  if (!age) return null;
+  const n = parseInt(age);
+  if (isNaN(n)) return null;
+  if (/hour/i.test(age))   return n;
+  if (/minute/i.test(age)) return n / 60;
+  if (/day/i.test(age))    return n * 24;
+  if (/week/i.test(age))   return n * 168;
+  return null;
 }
 
 function categoriseArticles(articles) {
   const rules = [
-    { cat: "Military",   score: 4, words: ["strike","attack","missile","bomb","airstrike","troops","military","soldiers","war","weapons","nuclear","drone","explosion","killed","forces","idf","irgc","navy","air force","tank","artillery","ammunition","rocket","ballistic","combat","casualt","wound","dead","death","destroy","target","intercept","iron dome","hezbollah","hamas","houthi"] },
-    { cat: "Diplomatic", score: 3, words: ["talks","negotiat","sanction","ceasefire","deal","treaty","agreement","diplomacy","minister","ambassador","un ","united nations","envoy","summit","meeting","visit","secretary","foreign","bilateral","relations","statement","condemn","warn","demand","ultimatum"] },
-    { cat: "Economic",   score: 3, words: ["oil","gas","price","barrel","economy","trade","export","import","bank","dollar","rial","currency","inflation","gdp","market","supply","energy","opec","sanction","revenue","budget","financial"] },
-    { cat: "Oil",        score: 3, words: ["crude","brent","wti","petroleum","refinery","pipeline","tanker","strait of hormuz","oil field","opec","energy export","oil price","oil supply","oil production"] },
-    { cat: "Civilian",   score: 2, words: ["civilian","hospital","school","refugee","displaced","humanitarian","aid","casualties","children","family","home","house","village","town","resident","population","food","water","shelter"] },
-    { cat: "Political",  score: 3, words: ["government","president","minister","parliament","election","policy","regime","leader","official","political","party","supreme leader","khamenei","trump","biden","netanyahu","raisi","congress","white house","kremlin","beijing"] },
+    { cat: "Military",   words: ["strike", "attack", "missile", "bomb", "kill", "dead", "troops", "military", "warship", "airstrike", "drone", "explosion", "soldier", "navy", "air force"] },
+    { cat: "Diplomatic", words: ["sanction", "talks", "ceasefire", "negotiat", "diplomat", "treaty", "agreement", "envoy", "UN", "foreign minister"] },
+    { cat: "Economic",   words: ["oil", "brent", "crude", "sanction", "export", "economy", "GDP", "inflation", "trade", "supply"] },
   ];
   return articles.map(a => {
     const text = (a.headline + " " + (a.summary || "")).toLowerCase();
     for (const rule of rules) {
-      if (rule.words.some(w => text.includes(w))) return { ...a, category: rule.cat, score: rule.score };
+      if (rule.words.some(w => text.includes(w))) return { ...a, category: rule.cat };
     }
-    return { ...a, category: "Political", score: 3 };
+    return { ...a, category: "Political" };
   });
 }
 
+// ── Generate reason (separate call after real scores computed) ────────────────
 async function generateReason(recentHeadlines, direction, anthropicKey) {
   if (!recentHeadlines) return null;
   const prompt = [
     `The momentum direction for the last 6 hours is: ${direction}.`,
     "Write ONE sentence (max 25 words) explaining the key recent events that support this direction.",
-    "Rules: attribute claims to source (US claims, Iran reports, per war monitor). No loaded words: dominated, overwhelmingly, degraded, ineffective, crippled, decisive.",
-    "Do NOT contradict the stated direction. State facts only.",
+    "Attribute claims to source: US claims, Iran reports, per war monitor. No loaded words: dominated, overwhelmingly, degraded, ineffective, crippled, decisive.",
+    "Do NOT contradict the stated direction. State specific facts only. Do NOT reference headline numbers.",
     "Return ONLY the sentence, no preamble.",
-    "Headlines:", recentHeadlines,
+    "Recent headlines:", recentHeadlines,
   ].join("\n");
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -254,17 +183,19 @@ async function generateReason(recentHeadlines, direction, anthropicKey) {
     });
     if (!res.ok) return null;
     const data = await res.json();
-    return (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").trim() || null;
+    return (data.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim() || null;
   } catch { return null; }
 }
 
+// ── Score momentum ────────────────────────────────────────────────────────────
 async function scoreMomentum(articles, anthropicKey) {
-  if (!articles.length) return articles;
-  // Sort by recency so [RECENT] articles appear first
-  const sorted = [...articles].sort((a, b) => (a.hoursAgo||99) - (b.hoursAgo||99));
+  if (!articles.length) return { articles, reason: null };
+
+  // Sort by recency so model sees freshest first; tag [RECENT] for <=6h
+  const sorted = [...articles].sort((a, b) => (a.hoursAgo || 99) - (b.hoursAgo || 99));
   const list = sorted.map((a, i) => {
-    const tag = (a.hoursAgo||99) <= 6 ? " [RECENT]" : "";
-    return i + ": [" + a.source + tag + "] " + a.headline;
+    const tag = (a.hoursAgo || 99) <= 6 ? " [RECENT]" : "";
+    return `${i}: [${a.source}${tag}] ${a.headline}`;
   }).join("\n");
   const sortedToOrig = sorted.map(a => articles.indexOf(a));
 
@@ -278,9 +209,9 @@ async function scoreMomentum(articles, anthropicKey) {
     "MILITARY — always directional, never 3:",
     "- Strikes ON Iran/proxies = 4 or 5. Strikes BY Iran/proxies = 1 or 2.",
     "- Iran casualties/destroyed/killed = 4. US/Israel casualties = 1 or 2.",
-    "- High death toll IN Iran, deaths IN Tehran = 4. High death toll IN Israel/US bases = 1 or 2.",
+    "- High death toll IN Iran or Tehran = 4. High death toll IN Israel/US bases = 1 or 2.",
     "- Iran losing soldiers, commanders, ships, aircraft = 4. Israel/US losing these = 1 or 2.",
-    "DIPLOMATIC — read direction:",
+    "DIPLOMATIC:",
     "- US/EU sanctions on Iran, Iran denied access, Iran isolated = 4",
     "- Iran enriching uranium, Iran defiant, Iran threatening = 2",
     "- Ceasefire both sides agree to = 3. Talks collapse = 2.",
@@ -290,42 +221,53 @@ async function scoreMomentum(articles, anthropicKey) {
     "- Brent moves with no stated conflict cause = 3",
     "RULE: Only score 3 when there is genuinely zero directional signal.",
     "When uncertain between 2/3 choose 2. When uncertain between 3/4 choose 4.",
-    "Also return a \"reason\" field as the LAST element. Base it ONLY on the MOST RECENT headlines (those published in the last few hours, i.e. lowest index numbers which appear first in the list).",
-    "RULES: (1) Report facts, not conclusions. (2) Attribute claims to their source: say US claims, Israel says, Iran reports, according to war monitor — never state contested claims as fact. (3) No loaded adjectives: no dominated, decisively, overwhelmingly, degraded, devastating, ineffective, crippled. (4) If recent scores lean 1-2: lead with Iran-attributed actions. If 4-5: lead with US/Israel-attributed actions. If ~3: one attributed fact per side. (5) One sentence, max 25 words.",
-    "Do NOT reference headline numbers or indices. Do NOT editorialize. Do NOT state military assessments as facts.",
-    "Return ONLY a JSON array e.g. [{\"i\":0,\"m\":4}]",
+    `Return ONLY a JSON array: [{"i":0,"m":4},{"i":1,"m":2}]`,
     "Headlines:", list,
   ].join("\n");
+
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "anthropic-version": "2023-06-01", "x-api-key": anthropicKey },
       body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(30000),
     });
-    if (!res.ok) return articles;
+    if (!res.ok) return { articles: articles.map(a => ({ ...a, momentum: 3 })), reason: null };
     const data = await res.json();
-    const text = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-    const clean = text.replace(/```[\w]*\n?/g,"").replace(/```/g,"").trim();
+    const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+    const clean = text.replace(/```[\w]*\n?/g, "").replace(/```/g, "").trim();
     const scores = JSON.parse(clean.match(/\[[\s\S]*\]/)?.[0] || "[]");
+
+    // Remap sorted indices back to original
     const scoredArticles = articles.map((a, origIdx) => {
       const sortedIdx = sortedToOrig.indexOf(origIdx);
       const s = scores.find(x => x.i === sortedIdx);
       return { ...a, momentum: s?.m ?? 3 };
     });
-    // Now compute 6h average from actual scores and generate reason
-    const recent6 = scoredArticles.filter(a => (a.hoursAgo||99) <= 6 && a.momentum !== 3);
-    const recent6Avg = recent6.length ? recent6.reduce((s, a) => s + a.momentum, 0) / recent6.length : null;
+
+    // Compute 6h average from actual scores, then generate reason in separate call
+    const recent6 = scoredArticles.filter(a => (a.hoursAgo || 99) <= 6 && a.momentum !== 3);
+    const recent6Avg = recent6.length
+      ? recent6.reduce((s, a) => s + a.momentum, 0) / recent6.length
+      : null;
     const recentDir = recent6Avg === null ? "mixed"
       : recent6Avg < 2.5 ? "Iran gained momentum"
       : recent6Avg > 3.5 ? "US/Israel gained momentum"
       : "mixed/neutral";
-    const recentHeadlines = sorted.filter(a => (a.hoursAgo||99) <= 6).map(a => "[" + a.source + "] " + a.headline).join("\n");
+
+    const recentHeadlines = sorted
+      .filter(a => (a.hoursAgo || 99) <= 6)
+      .map(a => `[${a.source}] ${a.headline}`)
+      .join("\n") || null;
+
     const reason = await generateReason(recentHeadlines, recentDir, anthropicKey);
     return { articles: scoredArticles, reason };
-  } catch { return { articles: articles.map(a => ({ ...a, momentum: 3 })), reason: null }; }
+  } catch {
+    return { articles: articles.map(a => ({ ...a, momentum: 3 })), reason: null };
+  }
 }
 
+// ── Brave side fetch ──────────────────────────────────────────────────────────
 async function fetchBraveSide(side, braveKey, force = false) {
   const results = await Promise.all(
     BRAVE_SOURCES[side].map(async ({ name, query }) => {
@@ -333,98 +275,79 @@ async function fetchBraveSide(side, braveKey, force = false) {
       return articles.map(a => ({ ...a, source: name }));
     })
   );
-  return results.flat().map(a => ({ ...a, hoursAgo: parseAgeToHours(a.age) }))
-    .filter(a => a.hoursAgo <= 72 && a.headline.length > 5);
+  return results.flat().map(a => ({ ...a, hoursAgo: parseAgeToHours(a.age) }));
 }
 
-// Fuzzy headline deduplication
-const STOP_WORDS = new Set(["a","an","the","in","on","at","to","of","for","and","or","but","is","are","was","were","be","been","has","have","had","as","by","from","with","that","this","it","its","says","say","told","tell","after","over","amid","into","iran","israel","us","trump"]);
+// ── Deduplication ─────────────────────────────────────────────────────────────
 function headlineFingerprint(h) {
-  return h.toLowerCase()
-    .replace(/[^a-z0-9 ]/g, " ")
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !STOP_WORDS.has(w))
-    .sort()
-    .join(" ");
+  return h.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim().split(" ").slice(0, 8).join(" ");
 }
+
 function extractQuotedPhrases(h) {
-  const matches = [];
-  // Match both curly and straight quotes
-  const re = /[‘’'"\u201c\u201d]([^\u2018\u2019\'\"“”]{4,})[‘’'"\u201c\u201d]/g;
-  let m;
-  while ((m = re.exec(h)) !== null) matches.push(m[1].toLowerCase().trim());
-  return matches;
+  return (h.match(/"([^"]{10,})"/g) || []).map(m => m.toLowerCase().replace(/"/g, "").trim());
 }
+
 function isSimilar(a, b) {
-  // If both headlines contain the same quoted phrase, they're the same story
-  const qa = extractQuotedPhrases(a);
-  const qb = extractQuotedPhrases(b);
-  if (qa.length && qb.length && qa.some(p => qb.some(q => p === q || p.includes(q) || q.includes(p)))) return true;
-  // Otherwise use keyword overlap with a slightly lower threshold
-  const fa = headlineFingerprint(a).split(" ").filter(Boolean);
-  const fb = new Set(headlineFingerprint(b).split(" ").filter(Boolean));
-  if (!fa.length || !fb.size) return false;
-  const overlap = fa.filter(w => fb.has(w)).length;
-  return overlap / Math.min(fa.length, fb.size) > 0.45;
+  const fa = headlineFingerprint(a), fb = headlineFingerprint(b);
+  const wa = new Set(fa.split(" ")), wb = new Set(fb.split(" "));
+  const intersection = [...wa].filter(w => wb.has(w)).length;
+  const union = new Set([...wa, ...wb]).size;
+  if (intersection / union > 0.6) return true;
+  const qa = extractQuotedPhrases(a), qb = extractQuotedPhrases(b);
+  return qa.some(p => qb.includes(p));
 }
 
-// Merge RSS + Brave, deduplicate by URL and fuzzy headline similarity
 function mergeAndDedupe(rssArticles, braveArticles) {
-  const seenUrls = new Set();
-  const all = [];
-  function tryAdd(a) {
-    if (a.url && seenUrls.has(a.url)) return;
-    if (all.some(ex => isSimilar(ex.headline, a.headline))) return;
-    if (a.url) seenUrls.add(a.url);
-    all.push(a);
+  const all = [...rssArticles, ...braveArticles];
+  const kept = [];
+  for (const a of all) {
+    if (!kept.some(k => isSimilar(k.headline, a.headline))) kept.push(a);
   }
-  for (const a of rssArticles) tryAdd(a);
-  for (const a of braveArticles) tryAdd(a);
-  return all;
+  return kept;
 }
 
+// ── Main orchestrator ─────────────────────────────────────────────────────────
 async function fetchAllSides(braveKey, anthropicKey, force = false) {
-  // Fetch RSS and all Brave sides in parallel
-  const [rssData, braveWest, braveIran, braveRucn] = await Promise.all([
-    fetchGoogleNewsRSS().catch(() => ({ west: [], iran: [], rucn: [] })),
+  const [rssItems, westBrave, iranBrave, rucnBrave] = await Promise.all([
+    fetchGoogleNewsRSS().catch(() => []),
     fetchBraveSide("west", braveKey, force).catch(() => []),
     fetchBraveSide("iran", braveKey, force).catch(() => []),
     fetchBraveSide("rucn", braveKey, force).catch(() => []),
   ]);
 
-  // Merge RSS + Brave per side
-  const westRaw  = mergeAndDedupe(rssData.west,  braveWest);
-  const iranRaw  = mergeAndDedupe(rssData.iran,  braveIran);
-  const rucnRaw  = mergeAndDedupe(rssData.rucn,  braveRucn);
+  const rssWest = [], rssIran = [], rssRucn = [];
+  for (const item of rssItems) {
+    const wSrc = getDomainSource(item.link, WESTERN_DOMAINS);
+    const iSrc = getDomainSource(item.link, IRAN_DOMAINS);
+    const rSrc = getDomainSource(item.link, RUCN_DOMAINS);
+    const pubDate = parseRSSDate(item.pubDate);
+    const hoursAgo = pubDate ? (Date.now() - pubDate.getTime()) / 3600000 : null;
+    const base = { headline: item.title, url: item.link, summary: item.desc || "", hoursAgo };
+    if (wSrc)      rssWest.push({ ...base, source: wSrc });
+    else if (iSrc) rssIran.push({ ...base, source: iSrc });
+    else if (rSrc) rssRucn.push({ ...base, source: rSrc });
+  }
 
-  // Categorise
-  const applyScoring = (articles) => {
-    const categorised = categoriseArticles(articles);
-    return categorised.map(a => {
-      const bonus = a.hoursAgo <= 1 ? 4 : a.hoursAgo <= 3 ? 3 : a.hoursAgo <= 12 ? 2 : a.hoursAgo <= 24 ? 1 : a.hoursAgo <= 48 ? 0 : -1;
-      return { ...a, score: Math.max(1, Math.min(7, a.score + bonus)) };
-    }).sort((a, b) => (a.hoursAgo ?? 999) - (b.hoursAgo ?? 999));
-  };
+  const west = mergeAndDedupe(rssWest, westBrave).slice(0, 40);
+  const iran = mergeAndDedupe(rssIran, iranBrave).slice(0, 40);
+  const rucn = mergeAndDedupe(rssRucn, rucnBrave).slice(0, 40);
 
-  const west = applyScoring(westRaw);
-  const iran = applyScoring(iranRaw);
-  const rucn = applyScoring(rucnRaw);
-
-  // Score momentum in one Claude call
   const allArticles = [...west, ...iran, ...rucn];
   const { articles: scored, reason: sentimentReason } = await scoreMomentum(allArticles, anthropicKey);
-  const wLen = west.length, iLen = iran.length;
+
+  const scoredWest = scored.slice(0, west.length);
+  const scoredIran = scored.slice(west.length, west.length + iran.length);
+  const scoredRucn = scored.slice(west.length + iran.length);
 
   return {
+    west:  categoriseArticles(scoredWest),
+    iran:  categoriseArticles(scoredIran),
+    rucn:  categoriseArticles(scoredRucn),
     sentimentReason,
-    west: scored.slice(0, wLen),
-    iran: scored.slice(wLen, wLen + iLen),
-    rucn: scored.slice(wLen + iLen),
-    cachedAt: Date.now(),
-    rssCount: rssData.west.length + rssData.iran.length + rssData.rucn.length,
   };
 }
 
+// ── Handler ───────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -434,101 +357,29 @@ export default async function handler(req, res) {
   if (!anthropicKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
   if (!braveKey) return res.status(500).json({ error: "BRAVE_API_KEY not configured" });
 
-  if (req.query.debug === "1") {
-    if (req.query.live !== "1") {
-      return res.status(200).json({
-        cacheStatus: cache.data ? "populated" : "empty",
-        cachedAt: cache.cachedAt ? new Date(cache.cachedAt).toISOString() : null,
-        cacheAgeSeconds: cache.cachedAt ? Math.round((Date.now() - cache.cachedAt) / 1000) : null,
-        articleCounts: cache.data ? { west: cache.data.west?.length || 0, iran: cache.data.iran?.length || 0, rucn: cache.data.rucn?.length || 0 } : null,
-        rssCount: cache.data?.rssCount ?? 0,
-      });
-    }
-    // Test RSS only
-    try {
-      const rss = await fetchGoogleNewsRSS();
-      return res.status(200).json({ rssWest: rss.west.slice(0,3), rssIran: rss.iran.slice(0,3), rssRucn: rss.rucn.slice(0,3), totalRSS: rss.west.length + rss.iran.length + rss.rucn.length });
-    } catch(e) { return res.status(500).json({ error: e.message }); }
-  }
-
   const force = req.query.force === "1";
+  const debug = req.query.debug === "1";
   const now = Date.now();
-  const stale = now - cache.cachedAt > CACHE_TTL_MS;
 
-  if (force) {
-    const timeSince = now - lastFetchStarted;
-    if (timeSince < FETCH_COOLDOWN_MS) {
-      return res.status(429).json({ cooldown: true, secondsRemaining: Math.ceil((FETCH_COOLDOWN_MS - timeSince) / 1000) });
-    }
+  if (!force && now - lastFetchStarted < FETCH_COOLDOWN_MS && cache.inFlight) {
+    try { return res.status(200).json(await cache.inFlight); }
+    catch (e) { return res.status(500).json({ error: e.message }); }
   }
 
-  if (!force && !stale && cache.data) { res.setHeader("X-Cache", "HIT"); return res.status(200).json(cache.data); }
-  if (!force && stale && cache.data && !cache.inFlight) {
-    res.setHeader("X-Cache", "STALE");
-    cache.inFlight = fetchAllSides(braveKey, anthropicKey, false)
-      .then(data => { cache = { data, cachedAt: Date.now(), inFlight: null }; })
-      .catch(() => { cache.inFlight = null; });
-    return res.status(200).json(cache.data);
+  if (!force && cache.data && (now - cache.cachedAt) < CACHE_TTL_MS) {
+    if (debug) return res.status(200).json({ ...cache.data, cached: true, cachedAt: cache.cachedAt, age: now - cache.cachedAt });
+    return res.status(200).json({ ...cache.data, cachedAt: cache.cachedAt });
   }
-  if (!force && cache.inFlight && cache.data) { res.setHeader("X-Cache", "STALE-INFLIGHT"); return res.status(200).json(cache.data); }
 
+  lastFetchStarted = now;
+  cache.inFlight = fetchAllSides(braveKey, anthropicKey, force);
   try {
-    res.setHeader("X-Cache", "MISS");
-    lastFetchStarted = Date.now();
-    const data = await fetchAllSides(braveKey, anthropicKey, force);
-    cache = { data, cachedAt: Date.now(), inFlight: null };
-    return res.status(200).json(data);
-  } catch(e) {
+    const data = await cache.inFlight;
+    cache = { data, cachedAt: now, inFlight: null };
+    return res.status(200).json({ ...data, cachedAt: now });
+  } catch (e) {
+    cache.inFlight = null;
     if (cache.data) return res.status(200).json({ ...cache.data, error: e.message });
     return res.status(500).json({ error: e.message });
-     "Also return a \\"reason\\" field as the LAST element. Base it ONLY on headlines tagged [RECENT].",
-    "Compute the average score of [RECENT] non-neutral articles first. If average < 3: Iran gained recently. If average > 3: US/Israel gained. If ~3: mixed.",
-    "Write one sentence (max 25 words) that MATCHES that average. Attribute claims: US claims, Iran reports, per war monitor. No loaded words: no dominated, overwhelmingly, degraded, ineffective.",
-    "Return ONLY a JSON array e.g. [{\"i\":0,\"m\":4}]",
-
-const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
-let cache = { data: null, cachedAt: 0, inFlight: null };
-let lastFetchStarted = 0;
-const FETCH_COOLDOWN_MS = 5000;
-
-// Google News RSS queries — near real-time, no API key needed
-const GNEWS_QUERIES = [
-  { q: "Iran war latest" },
-  { q: "Iran Israel strike" },
-  { q: "Tehran conflict" },
-];
-
-// Western news sites mapped for source attribution from Google RSS
-// Approved western sources only — anything not in this list is dropped
-const WESTERN_DOMAINS = {
-  "bbc.com": "BBC News", "bbc.co.uk": "BBC News",
-  "reuters.com": "Reuters",
-  "cnn.com": "CNN",
-  "apnews.com": "AP News",
-  "cbsnews.com": "CBS News",
-  "nytimes.com": "New York Times",
-  "aljazeera.com": "Al Jazeera",
-  "theguardian.com": "The Guardian",
-  "timesofisrael.com": "Times of Israel",
-  "npr.org": "NPR",
-};
-
-const IRAN_DOMAINS = {
-  "presstv.ir": "Press TV",
-  "almayadeen.net": "Al Mayadeen",
-  "irna.ir": "IRNA",
-  "tehrantimes.com": "Tehran Times",
-  "tasnimnews.com": "Tasnim News",
-  "mehrnews.com": "Mehr News",
-};
-
-const RUCN_DOMAINS = {
-  "rt.com": "RT",
-  "sputnikglobe.com": "Sputnik",
-  "tass.com": "TASS",
-  "cgtn.com": "CGTN",
-  "english.news.cn": "Xinhua",
-  "globaltimes.cn": "Global Times",
-};
-
-// Brave sources as backup / for Iran & Russian sources
+  }
+}
