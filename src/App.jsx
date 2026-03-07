@@ -137,13 +137,13 @@ function MomentumBanner({ sentiment, brentChange, reason }) {
   const neutral = sentiment > 2.5 && sentiment < 3.5;
 
   let signal = null;
-  if (iranGaining && brentUp)    signal = { text: "Iran gaining + Brent rising — supply disruption risk elevated", color: "#e06060" };
-  else if (usGaining && brentDown) signal = { text: "US/Israel dominant + Brent falling — supply disruption risk easing", color: "#5cb87a" };
-  else if (iranGaining && brentDown) signal = { text: "Iran gaining militarily but markets pricing in de-escalation", color: "#b7770d" };
-  else if (usGaining && brentUp) signal = { text: "US/Israel winning but Brent rising — Iran threatening oil routes", color: "#b7770d" };
-  else if (neutral && brentUp)   signal = { text: "Brent rising — markets pricing in supply disruption risk", color: "#b7770d" };
-  else if (neutral && brentDown) signal = { text: "Brent falling — markets see reduced supply disruption risk", color: "#5cb87a" };
-  else signal = { text: "Brent and momentum aligned — no divergence signal", color: "#555" };
+  if (iranGaining && brentUp)    signal = { text: "Iran gaining + Brent rising — market assuming oil disruption risk", color: "#e06060" };
+  else if (usGaining && brentDown) signal = { text: "US/Israel gaining + Brent falling — market assuming lower oil disruption risk", color: "#5cb87a" };
+  else if (iranGaining && brentDown) signal = { text: "Iran gaining + Brent falling — possible market divergence", color: "#b7770d" };
+  else if (usGaining && brentUp) signal = { text: "US/Israel gaining + Brent rising — watch for supply disruption", color: "#b7770d" };
+  else if (neutral && brentUp)   signal = { text: "Neutral momentum + Brent rising — markets pricing in risk", color: "#b7770d" };
+  else if (neutral && brentDown) signal = { text: "Neutral momentum + Brent falling — markets expect stabilisation", color: "#5cb87a" };
+  else signal = { text: "Momentum and Brent aligned — no divergence signal", color: "#555" };
 
   return (
     <div style={{ background: "#111", borderBottom: "1px solid #2a2a2a", padding: "6px 24px", display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
